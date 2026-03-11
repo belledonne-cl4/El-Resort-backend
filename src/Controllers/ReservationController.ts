@@ -1,0 +1,778 @@
+import type { Request, Response } from "express";
+import { ReservationService } from "../services/reservation.service";
+
+/**
+ * @openapi
+ * /api/reservations:
+ *   get:
+ *     tags: [Reservations]
+ *     summary: Listar reservas (Cloudbeds)
+ *     parameters:
+ *       - in: query
+ *         name: propertyID
+ *         required: false
+ *         schema: { type: string }
+ *         description: IDs de propiedades (coma-separado)
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [not_confirmed, confirmed, canceled, checked_in, checked_out, no_show]
+ *       - in: query
+ *         name: resultsFrom
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: resultsTo
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: modifiedFrom
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: modifiedTo
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: checkInFrom
+ *         required: false
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: checkInTo
+ *         required: false
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: checkOutFrom
+ *         required: false
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: checkOutTo
+ *         required: false
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: datesQueryMode
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [booking, rooms]
+ *       - in: query
+ *         name: roomID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: roomName
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: roomTypeID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: includeGuestsDetails
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: includeGuestRequirements
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: includeCustomFields
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: includeAllRooms
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: sourceId
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: sourceReservationId
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: ratePlanId
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: firstName
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: lastName
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: guestID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: allotmentBlockCode
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: groupCode
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: sortByRecent
+ *         required: false
+ *         schema: { type: boolean, default: true }
+ *       - in: query
+ *         name: pageNumber
+ *         required: false
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: Parámetros inválidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *   post:
+ *     tags: [Reservations]
+ *     summary: Crear reserva (Cloudbeds)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Body raw que se envía a Cloudbeds postReservation
+ *             example:
+ *               propertyID: null
+ *               sourceID: null
+ *               thirdPartyIdentifier: null
+ *               startDate: "2026-03-11"
+ *               endDate: "2026-03-12"
+ *               guestFirstName: "Juan"
+ *               guestLastName: "Perez"
+ *               guestGender: "N/A"
+ *               guestCountry: "PE"
+ *               guestZip: "15001"
+ *               guestEmail: "juan.perez@example.com"
+ *               guestPhone: null
+ *               guestRequirements: null
+ *               estimatedArrivalTime: null
+ *               rooms:
+ *                 - roomTypeID: "ROOM_TYPE_ID_AQUI"
+ *                   quantity: 1
+ *               adults:
+ *                 - roomTypeID: "ROOM_TYPE_ID_AQUI"
+ *                   quantity: 2
+ *               children:
+ *                 - roomTypeID: "ROOM_TYPE_ID_AQUI"
+ *                   quantity: 0
+ *               paymentMethod: "cash"
+ *               cardToken: null
+ *               paymentAuthorizationCode: null
+ *               customFields: null
+ *               promoCode: null
+ *               allotmentBlockCode: null
+ *               groupCode: null
+ *               dateCreated: null
+ *               sendEmailConfirmation: true
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: Body inválido
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+/**
+ * @openapi
+ * /api/reservations/sources:
+ *   get:
+ *     tags: [Reservations]
+ *     summary: Listar sources disponibles (Cloudbeds)
+ *     parameters:
+ *       - in: query
+ *         name: propertyIDs
+ *         required: false
+ *         schema: { type: string }
+ *         description: IDs de propiedades (coma-separado)
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+/**
+ * @openapi
+ * /api/reservations/assignments:
+ *   get:
+ *     tags: [Reservations]
+ *     summary: Listar asignaciones de reservas/rooms (Cloudbeds)
+ *     parameters:
+ *       - in: query
+ *         name: propertyID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: date
+ *         required: false
+ *         schema: { type: string, format: date }
+ *         description: Si no se envía, Cloudbeds usa el día actual
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+/**
+ * @openapi
+ * /api/reservations/with-rate-details:
+ *   get:
+ *     tags: [Reservations]
+ *     summary: Listar reservas con rate details (Cloudbeds)
+ *     parameters:
+ *       - in: query
+ *         name: propertyID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: resultsFrom
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: resultsTo
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: modifiedFrom
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: modifiedTo
+ *         required: false
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: sortByRecent
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: reservationID
+ *         required: false
+ *         schema: { type: string }
+ *         description: Reservation identifiers (coma-separado)
+ *       - in: query
+ *         name: reservationCheckOutFrom
+ *         required: false
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: reservationCheckOutTo
+ *         required: false
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: includeDeleted
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: excludeStatuses
+ *         required: false
+ *         schema: { type: string }
+ *         description: Lista de statuses a excluir (coma-separado)
+ *       - in: query
+ *         name: includeGuestsDetails
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: includeGuestRequirements
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: includeCustomFields
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: guestID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: pageNumber
+ *         required: false
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema: { type: integer, default: 100, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+/**
+ * @openapi
+ * /api/reservations/{reservationID}/notes:
+ *   get:
+ *     tags: [Reservations]
+ *     summary: Obtener notas de una reserva (Cloudbeds)
+ *     parameters:
+ *       - in: path
+ *         name: reservationID
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: propertyID
+ *         required: false
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: Parámetros inválidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *   post:
+ *     tags: [Reservations]
+ *     summary: Agregar nota a una reserva (Cloudbeds)
+ *     parameters:
+ *       - in: path
+ *         name: reservationID
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: propertyID
+ *         required: false
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reservationNote]
+ *             properties:
+ *               reservationNote: { type: string }
+ *               userID: { type: string, nullable: true }
+ *               dateCreated: { type: string, format: date-time, nullable: true }
+ *           example:
+ *             reservationNote: "Nota de prueba"
+ *             userID: null
+ *             dateCreated: null
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: Parámetros inválidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+/**
+ * @openapi
+ * /api/reservations/{reservationID}:
+ *   get:
+ *     tags: [Reservations]
+ *     summary: Obtener una reserva (Cloudbeds)
+ *     parameters:
+ *       - in: path
+ *         name: reservationID
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: propertyID
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: includeGuestRequirements
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: Parámetros inválidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+const pickFirstQueryValue = (value: unknown): string | undefined => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return undefined;
+};
+
+const asOptionalString = (value: unknown): string | undefined => {
+  const raw = pickFirstQueryValue(value);
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length ? trimmed : undefined;
+};
+
+const asOptionalInt = (value: unknown): number | undefined => {
+  const raw = pickFirstQueryValue(value);
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed.length) return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed)) return undefined;
+  return parsed;
+};
+
+const asOptionalBoolean = (value: unknown): boolean | undefined => {
+  const raw = pickFirstQueryValue(value);
+  if (raw === undefined) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  return undefined;
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+export class ReservationController {
+  static getSources = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const propertyIDs = asOptionalString(req.query.propertyIDs);
+      const data = await ReservationService.getSources({ propertyIDs });
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static getReservationAssignments = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const data = await ReservationService.getReservationAssignments({
+        propertyID: asOptionalString(req.query.propertyID),
+        date: asOptionalString(req.query.date),
+      });
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static getReservationsWithRateDetails = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const pageNumberRaw = asOptionalInt(req.query.pageNumber);
+      const pageSizeRaw = asOptionalInt(req.query.pageSize);
+
+      if (pageNumberRaw !== undefined && pageNumberRaw < 1) {
+        res.status(400).json({ error: "pageNumber inválido" });
+        return;
+      }
+      if (pageSizeRaw !== undefined && pageSizeRaw < 1) {
+        res.status(400).json({ error: "pageSize inválido" });
+        return;
+      }
+
+      const pageNumber = pageNumberRaw ?? 1;
+      const pageSize = clamp(pageSizeRaw ?? 100, 1, 100);
+
+      const includeGuestsDetailsRaw = asOptionalBoolean(req.query.includeGuestsDetails);
+      const includeGuestRequirementsRaw = asOptionalBoolean(req.query.includeGuestRequirements);
+      const includeCustomFieldsRaw = asOptionalBoolean(req.query.includeCustomFields);
+      const includeDeletedRaw = asOptionalBoolean(req.query.includeDeleted);
+      const sortByRecentRaw = asOptionalBoolean(req.query.sortByRecent);
+
+      const includeGuestRequirements = includeGuestRequirementsRaw === true ? true : undefined;
+      const includeGuestsDetails =
+        includeGuestRequirements === true ? true : includeGuestsDetailsRaw === true ? true : undefined;
+      const includeCustomFields = includeCustomFieldsRaw === true ? true : undefined;
+      const includeDeleted = includeDeletedRaw === true ? true : undefined;
+      const sortByRecent = sortByRecentRaw === true ? true : undefined;
+
+      const data = await ReservationService.getReservationsWithRateDetails({
+        propertyID: asOptionalString(req.query.propertyID),
+        resultsFrom: asOptionalString(req.query.resultsFrom),
+        resultsTo: asOptionalString(req.query.resultsTo),
+        modifiedFrom: asOptionalString(req.query.modifiedFrom),
+        modifiedTo: asOptionalString(req.query.modifiedTo),
+        sortByRecent,
+        reservationID: asOptionalString(req.query.reservationID),
+        reservationCheckOutFrom: asOptionalString(req.query.reservationCheckOutFrom),
+        reservationCheckOutTo: asOptionalString(req.query.reservationCheckOutTo),
+        includeDeleted,
+        excludeStatuses: asOptionalString(req.query.excludeStatuses),
+        includeGuestsDetails,
+        includeGuestRequirements,
+        includeCustomFields,
+        guestID: asOptionalString(req.query.guestID),
+        pageNumber,
+        pageSize,
+      });
+
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static postReservation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+        res.status(400).json({ error: "Body inválido (se espera JSON objeto)" });
+        return;
+      }
+
+      const data = await ReservationService.postReservation(req.body);
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static getReservationNotes = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const reservationID = asOptionalString(req.params.reservationID);
+      if (!reservationID) {
+        res.status(400).json({ error: "reservationID es requerido" });
+        return;
+      }
+
+      const data = await ReservationService.getReservationNotes({
+        reservationID,
+        propertyID: asOptionalString(req.query.propertyID),
+      });
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static postReservationNote = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const reservationID = asOptionalString(req.params.reservationID);
+      if (!reservationID) {
+        res.status(400).json({ error: "reservationID es requerido" });
+        return;
+      }
+
+      if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+        res.status(400).json({ error: "Body inválido (se espera JSON objeto)" });
+        return;
+      }
+
+      const reservationNote =
+        typeof (req.body as any).reservationNote === "string" ? (req.body as any).reservationNote.trim() : "";
+      if (!reservationNote) {
+        res.status(400).json({ error: "reservationNote es requerido" });
+        return;
+      }
+
+      const userID = typeof (req.body as any).userID === "string" ? (req.body as any).userID.trim() : undefined;
+      const dateCreated =
+        typeof (req.body as any).dateCreated === "string" ? (req.body as any).dateCreated.trim() : undefined;
+
+      const data = await ReservationService.postReservationNote({
+        reservationID,
+        reservationNote,
+        propertyID: asOptionalString(req.query.propertyID),
+        userID,
+        dateCreated,
+      });
+
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static getReservation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const reservationID = asOptionalString(req.params.reservationID);
+      if (!reservationID) {
+        res.status(400).json({ error: "reservationID es requerido" });
+        return;
+      }
+
+      const propertyID = asOptionalString(req.query.propertyID);
+      const includeGuestRequirementsRaw = asOptionalBoolean(req.query.includeGuestRequirements);
+      const includeGuestRequirements = includeGuestRequirementsRaw === true ? true : undefined;
+
+      const data = await ReservationService.getReservation({ reservationID, propertyID, includeGuestRequirements });
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static getReservations = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const pageNumberRaw = asOptionalInt(req.query.pageNumber);
+      const pageSizeRaw = asOptionalInt(req.query.pageSize);
+
+      if (pageNumberRaw !== undefined && pageNumberRaw < 1) {
+        res.status(400).json({ error: "pageNumber inválido" });
+        return;
+      }
+      if (pageSizeRaw !== undefined && pageSizeRaw < 1) {
+        res.status(400).json({ error: "pageSize inválido" });
+        return;
+      }
+
+      const pageNumber = pageNumberRaw ?? 1;
+      const pageSize = clamp(pageSizeRaw ?? 20, 1, 20);
+
+      const status = asOptionalString(req.query.status);
+      const allowedStatus: NonNullable<Parameters<typeof ReservationService.getReservations>[0]["status"]>[] = [
+        "not_confirmed",
+        "confirmed",
+        "canceled",
+        "checked_in",
+        "checked_out",
+        "no_show",
+      ];
+      if (status && !allowedStatus.includes(status as any)) {
+        res.status(400).json({ error: "status inválido" });
+        return;
+      }
+
+      const datesQueryMode = asOptionalString(req.query.datesQueryMode);
+      const allowedDatesQueryMode: NonNullable<Parameters<typeof ReservationService.getReservations>[0]["datesQueryMode"]>[] = [
+        "booking",
+        "rooms",
+      ];
+      if (datesQueryMode && !allowedDatesQueryMode.includes(datesQueryMode as any)) {
+        res.status(400).json({ error: "datesQueryMode inválido" });
+        return;
+      }
+
+      const includeGuestsDetailsRaw = asOptionalBoolean(req.query.includeGuestsDetails);
+      const includeGuestRequirementsRaw = asOptionalBoolean(req.query.includeGuestRequirements);
+      const includeCustomFieldsRaw = asOptionalBoolean(req.query.includeCustomFields);
+      const includeAllRoomsRaw = asOptionalBoolean(req.query.includeAllRooms);
+
+      const includeGuestRequirements = includeGuestRequirementsRaw === true ? true : undefined;
+      const includeGuestsDetails =
+        includeGuestRequirements === true ? true : includeGuestsDetailsRaw === true ? true : undefined;
+      const includeCustomFields = includeCustomFieldsRaw === true ? true : undefined;
+      const includeAllRooms = includeAllRoomsRaw === true ? true : undefined;
+
+      const sortByRecentRaw = asOptionalBoolean(req.query.sortByRecent);
+      const sortByRecent = sortByRecentRaw === false ? false : undefined;
+
+      const data = await ReservationService.getReservations({
+        pageNumber,
+        pageSize,
+        propertyID: asOptionalString(req.query.propertyID),
+        status: status as any,
+        resultsFrom: asOptionalString(req.query.resultsFrom),
+        resultsTo: asOptionalString(req.query.resultsTo),
+        modifiedFrom: asOptionalString(req.query.modifiedFrom),
+        modifiedTo: asOptionalString(req.query.modifiedTo),
+        checkInFrom: asOptionalString(req.query.checkInFrom),
+        checkInTo: asOptionalString(req.query.checkInTo),
+        checkOutFrom: asOptionalString(req.query.checkOutFrom),
+        checkOutTo: asOptionalString(req.query.checkOutTo),
+        datesQueryMode: datesQueryMode as any,
+        roomID: asOptionalString(req.query.roomID),
+        roomName: asOptionalString(req.query.roomName),
+        roomTypeID: asOptionalString(req.query.roomTypeID),
+        includeGuestsDetails,
+        includeGuestRequirements,
+        includeCustomFields,
+        includeAllRooms,
+        sourceId: asOptionalString(req.query.sourceId),
+        sourceReservationId: asOptionalString(req.query.sourceReservationId),
+        ratePlanId: asOptionalString(req.query.ratePlanId),
+        firstName: asOptionalString(req.query.firstName),
+        lastName: asOptionalString(req.query.lastName),
+        guestID: asOptionalString(req.query.guestID),
+        allotmentBlockCode: asOptionalString(req.query.allotmentBlockCode),
+        groupCode: asOptionalString(req.query.groupCode),
+        sortByRecent,
+      });
+      res.json(data);
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  private static formatCloudbedsError(error: InstanceType<typeof ReservationService.CloudbedsHttpError>) {
+    return {
+      provider: "cloudbeds",
+      status: error.status,
+      message: error.message,
+      request: error.request,
+      data: error.responseBody,
+    };
+  }
+}
