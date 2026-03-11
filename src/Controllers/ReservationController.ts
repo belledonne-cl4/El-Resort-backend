@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { ReservationService } from "../services/reservation.service";
+import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudbedsError } from "../utils/http";
 
 /**
  * @openapi
@@ -439,40 +440,6 @@ import { ReservationService } from "../services/reservation.service";
  *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  */
 
-const pickFirstQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return undefined;
-};
-
-const asOptionalString = (value: unknown): string | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : undefined;
-};
-
-const asOptionalInt = (value: unknown): number | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed.length) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed)) return undefined;
-  return parsed;
-};
-
-const asOptionalBoolean = (value: unknown): boolean | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  return undefined;
-};
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
 export class ReservationController {
   static getSources = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -481,7 +448,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -497,7 +464,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -557,7 +524,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -575,7 +542,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -597,7 +564,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -639,7 +606,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 
@@ -663,7 +630,7 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
@@ -716,9 +683,13 @@ export class ReservationController {
       const includeCustomFieldsRaw = asOptionalBoolean(req.query.includeCustomFields);
       const includeAllRoomsRaw = asOptionalBoolean(req.query.includeAllRooms);
 
+      if (includeGuestRequirementsRaw === true && includeGuestsDetailsRaw !== true) {
+        res.status(400).json({ error: "includeGuestRequirements requiere includeGuestsDetails=true" });
+        return;
+      }
+
       const includeGuestRequirements = includeGuestRequirementsRaw === true ? true : undefined;
-      const includeGuestsDetails =
-        includeGuestRequirements === true ? true : includeGuestsDetailsRaw === true ? true : undefined;
+      const includeGuestsDetails = includeGuestsDetailsRaw === true ? true : undefined;
       const includeCustomFields = includeCustomFieldsRaw === true ? true : undefined;
       const includeAllRooms = includeAllRoomsRaw === true ? true : undefined;
 
@@ -759,20 +730,10 @@ export class ReservationController {
       res.json(data);
     } catch (error) {
       if (error instanceof ReservationService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({ error: ReservationController.formatCloudbedsError(error) });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
       res.status(500).json({ error: "Error interno del servidor" });
     }
   };
-
-  private static formatCloudbedsError(error: InstanceType<typeof ReservationService.CloudbedsHttpError>) {
-    return {
-      provider: "cloudbeds",
-      status: error.status,
-      message: error.message,
-      request: error.request,
-      data: error.responseBody,
-    };
-  }
 }

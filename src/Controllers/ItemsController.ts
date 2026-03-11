@@ -1,18 +1,6 @@
 import type { Request, Response } from "express";
 import { ItemsService } from "../services/items.service";
-
-const pickFirstQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return undefined;
-};
-
-const asOptionalString = (value: unknown): string | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : undefined;
-};
+import { asOptionalString, formatCloudbedsError } from "../utils/http";
 
 /**
  * @openapi
@@ -110,15 +98,7 @@ export class ItemsController {
       res.json(data);
     } catch (error) {
       if (error instanceof ItemsService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({
-          error: {
-            provider: "cloudbeds",
-            status: error.status,
-            message: error.message,
-            request: error.request,
-            data: error.responseBody,
-          },
-        });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 
@@ -159,15 +139,7 @@ export class ItemsController {
       res.json(data);
     } catch (error) {
       if (error instanceof ItemsService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({
-          error: {
-            provider: "cloudbeds",
-            status: error.status,
-            message: error.message,
-            request: error.request,
-            data: error.responseBody,
-          },
-        });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 

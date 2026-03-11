@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { CustomFieldsService } from "../services/customfields.service";
+import { formatCloudbedsError } from "../utils/http";
 
 /**
  * @openapi
@@ -40,15 +41,7 @@ export class CustomFieldsController {
       res.json(data);
     } catch (error) {
       if (error instanceof CustomFieldsService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({
-          error: {
-            provider: "cloudbeds",
-            status: error.status,
-            message: error.message,
-            request: error.request,
-            data: error.responseBody,
-          },
-        });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 
@@ -56,4 +49,3 @@ export class CustomFieldsController {
     }
   };
 }
-

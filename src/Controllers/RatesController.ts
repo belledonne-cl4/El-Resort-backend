@@ -1,39 +1,8 @@
 import type { Request, Response } from "express";
 import { RatesService } from "../services/rates.service";
-
-const pickFirstQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return undefined;
-};
-
-const asOptionalString = (value: unknown): string | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : undefined;
-};
+import { asOptionalBoolean, asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/http";
 
 const asRequiredString = (value: unknown): string | undefined => asOptionalString(value);
-
-const asOptionalInt = (value: unknown): number | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed.length) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed)) return undefined;
-  return parsed;
-};
-
-const asOptionalBoolean = (value: unknown): boolean | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  return undefined;
-};
 
 /**
  * @openapi
@@ -132,15 +101,7 @@ export class RatesController {
       res.json(data);
     } catch (error) {
       if (error instanceof RatesService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({
-          error: {
-            provider: "cloudbeds",
-            status: error.status,
-            message: error.message,
-            request: error.request,
-            data: error.responseBody,
-          },
-        });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 
@@ -251,15 +212,7 @@ export class RatesController {
       res.json(data);
     } catch (error) {
       if (error instanceof RatesService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({
-          error: {
-            provider: "cloudbeds",
-            status: error.status,
-            message: error.message,
-            request: error.request,
-            data: error.responseBody,
-          },
-        });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 

@@ -1,28 +1,6 @@
 import type { Request, Response } from "express";
 import { RoomsService } from "../services/rooms.service";
-
-const pickFirstQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return undefined;
-};
-
-const asOptionalString = (value: unknown): string | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : undefined;
-};
-
-const asOptionalInt = (value: unknown): number | undefined => {
-  const raw = pickFirstQueryValue(value);
-  if (raw === undefined) return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed.length) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed)) return undefined;
-  return parsed;
-};
+import { asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/http";
 
 /**
  * @openapi
@@ -127,15 +105,7 @@ export class RoomsController {
       res.json(data);
     } catch (error) {
       if (error instanceof RoomsService.CloudbedsHttpError) {
-        res.status(error.status || 502).json({
-          error: {
-            provider: "cloudbeds",
-            status: error.status,
-            message: error.message,
-            request: error.request,
-            data: error.responseBody,
-          },
-        });
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
         return;
       }
 
@@ -143,4 +113,3 @@ export class RoomsController {
     }
   };
 }
-
