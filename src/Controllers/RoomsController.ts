@@ -170,6 +170,11 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, formatCloudbedsErro
  *         required: false
  *         schema: { type: integer, minimum: 0 }
  *       - in: query
+ *         name: promoCode
+ *         required: false
+ *         schema: { type: string }
+ *         description: "Si se envía, se pasa a /api/rates/plans como filtro. Si NO se envía, se fuerza includePromoCode=false."
+ *       - in: query
  *         name: pageNumber
  *         required: false
  *         schema: { type: integer, default: 1, minimum: 1 }
@@ -320,6 +325,7 @@ export class RoomsController {
       const query = req.query as Record<string, unknown>;
       const startDate = asOptionalString(query.startDate ?? query["start-date"]);
       const endDate = asOptionalString(query.endDate ?? query["end-date"]);
+      const promoCode = asOptionalString(query.promoCode);
 
       if (!startDate || !endDate) {
         res.status(400).json({ error: "startDate y endDate son requeridos" });
@@ -349,7 +355,7 @@ export class RoomsController {
         return;
       }
 
-      const all = await RoomTypesShowService.listRoomTypesBase({ startDate, endDate, maxGuests });
+      const all = await RoomTypesShowService.listRoomTypesWithPricing({ startDate, endDate, maxGuests, promoCode });
       const total = all.length;
       const startIndex = (pageNumber - 1) * pageSize;
       const data = all.slice(startIndex, startIndex + pageSize);

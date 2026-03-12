@@ -440,6 +440,65 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudb
  *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  */
 
+/**
+ * @openapi
+ * /api/reservations/book:
+ *   post:
+ *     tags: [Reservations]
+ *     summary: Post reserva (modelo propio)
+ *     description: Endpoint propio (combinaciÃ³n de 2 endpoints). Por ahora solo define el contrato del body.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             example:
+ *               sourceID: "string"
+ *               startDate: "YYYY-MM-DD"
+ *               endDate: "YYYY-MM-DD"
+ *               guestFirstName: "string"
+ *               guestLastName: "string"
+ *               guestGender: "M | F | N/A"
+ *               guestCountry: "PE"
+ *               guestEmail: "correo@ejemplo.com"
+ *               guestPhone: "+51999999999"
+ *               estimatedArrivalTime: "14:00"
+ *               mascota: 0
+ *               rooms:
+ *                 - roomTypeID: "string"
+ *                   quantity: 1
+ *                   roomID: "string"
+ *                   roomRateID: "string"
+ *               adults:
+ *                 - roomTypeID: "string"
+ *                   quantity: 2
+ *                   roomID: "string"
+ *               children:
+ *                 - roomTypeID: "string"
+ *                   quantity: 0
+ *                   roomID: "string"
+ *               extraGuests:
+ *                 - guestFirstName: "string"
+ *                   guestLastName: "string"
+ *                   guestGender: "M | F | N/A"
+ *                   guestCountry: "PE"
+ *                   guestEmail: "correo@ejemplo.com"
+ *                   guestPhone: "+51999999999"
+ *               paymentMethod: "cash"
+ *               cardToken: "string"
+ *               paymentAuthorizationCode: "string"
+ *               promoCode: "string"
+ *     responses:
+ *       501:
+ *         description: No implementado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error: { type: string }
+ */
 export class ReservationController {
   static getSources = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -529,6 +588,10 @@ export class ReservationController {
       }
       res.status(500).json({ error: "Error interno del servidor" });
     }
+  };
+
+  static bookReservation = async (_req: Request, res: Response): Promise<void> => {
+    res.status(501).json({ error: "No implementado" });
   };
 
   static postReservation = async (req: Request, res: Response): Promise<void> => {

@@ -5,6 +5,7 @@ const router = Router();
 
 router.get("/", ReservationController.getReservations);
 router.post("/", ReservationController.postReservation);
+router.post("/book", ReservationController.bookReservation);
 router.get("/sources", ReservationController.getSources);
 router.get("/assignments", ReservationController.getReservationAssignments);
 router.get("/with-rate-details", ReservationController.getReservationsWithRateDetails);
