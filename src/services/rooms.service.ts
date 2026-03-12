@@ -15,6 +15,23 @@ export type GetRoomsParams = {
   sort?: string;
 };
 
+export type GetRoomTypesParams = {
+  propertyIDs?: string;
+  roomTypeIDs?: string;
+  startDate?: string;
+  endDate?: string;
+  adults?: number;
+  children?: number;
+  detailedRates?: boolean;
+  roomTypeName?: string;
+  propertyCity?: string;
+  propertyName?: string;
+  maxGuests?: string;
+  pageNumber?: number;
+  pageSize?: number;
+  sort?: string;
+};
+
 let cachedClient: CloudbedsClient | null = null;
 const getClient = () => {
   if (!cachedClient) cachedClient = createCloudbedsClientFromEnv();
@@ -34,6 +51,20 @@ export const RoomsService = {
     return response;
   },
 
+  async getRoomTypes(params: GetRoomTypesParams = {}): Promise<JsonObject> {
+    const client = getClient();
+
+    const response = await client.requestJson<JsonObject>({
+      method: "GET",
+      path: "/getRoomTypes",
+      params: {
+        ...params,
+        detailedRates: params.detailedRates === true ? true : undefined,
+      },
+    });
+
+    return response;
+  },
+
   CloudbedsHttpError,
 };
-

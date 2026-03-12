@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { RoomsService } from "../services/rooms.service";
-import { asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/http";
+import { asOptionalBoolean, asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/http";
 
 /**
  * @openapi
@@ -62,6 +62,91 @@ import { asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/
  *           application/json:
  *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  */
+
+/**
+ * @openapi
+ * /api/rooms/types:
+ *   get:
+ *     tags: [Rooms]
+ *     summary: Listar room types (Cloudbeds)
+ *     parameters:
+ *       - in: query
+ *         name: propertyIDs
+ *         required: false
+ *         schema: { type: string }
+ *         description: Property IDs (coma-separado)
+ *       - in: query
+ *         name: roomTypeIDs
+ *         required: false
+ *         schema: { type: string }
+ *         description: Room Type IDs (coma-separado)
+ *       - in: query
+ *         name: startDate
+ *         required: false
+ *         schema: { type: string, format: date }
+ *         description: Check-in date (requerido si se quieren rates)
+ *       - in: query
+ *         name: endDate
+ *         required: false
+ *         schema: { type: string, format: date }
+ *         description: Check-out date (requerido si se quieren rates)
+ *       - in: query
+ *         name: adults
+ *         required: false
+ *         schema: { type: integer, minimum: 0 }
+ *         description: Requerido si se quieren rates
+ *       - in: query
+ *         name: children
+ *         required: false
+ *         schema: { type: integer, minimum: 0 }
+ *         description: Requerido si se quieren rates
+ *       - in: query
+ *         name: detailedRates
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: roomTypeName
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: propertyCity
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: propertyName
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: maxGuests
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: pageNumber
+ *         required: false
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema: { type: integer, default: 20, minimum: 1 }
+ *       - in: query
+ *         name: sort
+ *         required: false
+ *         schema: { type: string }
+ *         description: "Reglas: field[:direction];... (sorting_position)"
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: Parámetros inválidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
 export class RoomsController {
   static getRooms = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -97,6 +182,68 @@ export class RoomsController {
         startDate,
         endDate,
         includeRoomRelations,
+        pageNumber: pageNumber ?? 1,
+        pageSize: pageSize ?? 20,
+        sort: asOptionalString(req.query.sort),
+      });
+
+      res.json(data);
+    } catch (error) {
+      if (error instanceof RoomsService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
+        return;
+      }
+
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static getRoomTypes = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const startDate = asOptionalString(req.query.startDate);
+      const endDate = asOptionalString(req.query.endDate);
+
+      if ((startDate && !endDate) || (!startDate && endDate)) {
+        res.status(400).json({ error: "startDate y endDate deben enviarse juntos" });
+        return;
+      }
+
+      const adults = asOptionalInt(req.query.adults);
+      const children = asOptionalInt(req.query.children);
+      if (adults !== undefined && adults < 0) {
+        res.status(400).json({ error: "adults inválido" });
+        return;
+      }
+      if (children !== undefined && children < 0) {
+        res.status(400).json({ error: "children inválido" });
+        return;
+      }
+
+      const pageNumber = asOptionalInt(req.query.pageNumber);
+      const pageSize = asOptionalInt(req.query.pageSize);
+      if (pageNumber !== undefined && pageNumber < 1) {
+        res.status(400).json({ error: "pageNumber inválido" });
+        return;
+      }
+      if (pageSize !== undefined && pageSize < 1) {
+        res.status(400).json({ error: "pageSize inválido" });
+        return;
+      }
+
+      const detailedRates = asOptionalBoolean(req.query.detailedRates);
+
+      const data = await RoomsService.getRoomTypes({
+        propertyIDs: asOptionalString(req.query.propertyIDs),
+        roomTypeIDs: asOptionalString(req.query.roomTypeIDs),
+        startDate,
+        endDate,
+        adults,
+        children,
+        detailedRates: detailedRates === true ? true : undefined,
+        roomTypeName: asOptionalString(req.query.roomTypeName),
+        propertyCity: asOptionalString(req.query.propertyCity),
+        propertyName: asOptionalString(req.query.propertyName),
+        maxGuests: asOptionalString(req.query.maxGuests),
         pageNumber: pageNumber ?? 1,
         pageSize: pageSize ?? 20,
         sort: asOptionalString(req.query.sort),
