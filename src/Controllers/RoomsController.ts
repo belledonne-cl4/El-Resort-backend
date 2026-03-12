@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { RoomsService } from "../services/rooms.service";
+import { RoomTypesShowService } from "../services/roomTypesShow.service";
 import { asOptionalBoolean, asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/http";
 
 /**
@@ -147,6 +148,60 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, formatCloudbedsErro
  *           application/json:
  *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  */
+
+/**
+ * @openapi
+ * /api/rooms/show:
+ *   get:
+ *     tags: [Rooms]
+ *     summary: Listar room types (modelo propio, base)
+ *     description: Agrega /api/rooms + /api/rooms/types y devuelve RoomTypeModel[]. pricing queda vacío por defecto.
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: endDate
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: maxGuests
+ *         required: false
+ *         schema: { type: integer, minimum: 0 }
+ *       - in: query
+ *         name: pageNumber
+ *         required: false
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema: { type: integer, default: 20, minimum: 1 }
+ *     responses:
+ *       200:
+ *         description: Listado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items: { type: object }
+ *                 count: { type: integer }
+ *                 total: { type: integer }
+ *       400:
+ *         description: ParÃ¡metros invÃ¡lidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
 export class RoomsController {
   static getRooms = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -250,6 +305,56 @@ export class RoomsController {
       });
 
       res.json(data);
+    } catch (error) {
+      if (error instanceof RoomsService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
+        return;
+      }
+
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static showRoomTypes = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const query = req.query as Record<string, unknown>;
+      const startDate = asOptionalString(query.startDate ?? query["start-date"]);
+      const endDate = asOptionalString(query.endDate ?? query["end-date"]);
+
+      if (!startDate || !endDate) {
+        res.status(400).json({ error: "startDate y endDate son requeridos" });
+        return;
+      }
+
+      const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+      if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+        res.status(400).json({ error: "startDate/endDate deben tener formato YYYY-MM-DD" });
+        return;
+      }
+
+      const maxGuests = asOptionalInt(query.maxGuests);
+      if (maxGuests !== undefined && maxGuests < 0) {
+        res.status(400).json({ error: "maxGuests invÃ¡lido" });
+        return;
+      }
+
+      const pageNumber = asOptionalInt(query.pageNumber) ?? 1;
+      const pageSize = asOptionalInt(query.pageSize) ?? 20;
+      if (pageNumber < 1) {
+        res.status(400).json({ error: "pageNumber invÃ¡lido" });
+        return;
+      }
+      if (pageSize < 1) {
+        res.status(400).json({ error: "pageSize invÃ¡lido" });
+        return;
+      }
+
+      const all = await RoomTypesShowService.listRoomTypesBase({ startDate, endDate, maxGuests });
+      const total = all.length;
+      const startIndex = (pageNumber - 1) * pageSize;
+      const data = all.slice(startIndex, startIndex + pageSize);
+
+      res.json({ success: true, data, count: data.length, total });
     } catch (error) {
       if (error instanceof RoomsService.CloudbedsHttpError) {
         res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
