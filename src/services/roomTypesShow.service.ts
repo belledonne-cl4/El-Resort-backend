@@ -4,6 +4,8 @@ import { type RoomTypeModel } from "../models/RoomType.model";
 import { RatesService } from "./rates.service";
 import type { RateSummary } from "../models/RateSummary";
 
+const EXTENDED_STAY_MIN_NIGHTS = 4;
+
 type CloudbedsRoomsResponse = {
   success?: boolean;
   data?: Array<{
@@ -54,6 +56,48 @@ const normalizeRoomTypeFeatures = (value: unknown): string[] | undefined => {
 const parseCloudbedsRoomsResponse = (raw: JsonObject): CloudbedsRoomsResponse => raw as unknown as CloudbedsRoomsResponse;
 const parseCloudbedsRoomTypesResponse = (raw: JsonObject): CloudbedsRoomTypesResponse => raw as unknown as CloudbedsRoomTypesResponse;
 const parseCloudbedsRatePlansResponse = (raw: JsonObject): CloudbedsRatePlansResponse => raw as unknown as CloudbedsRatePlansResponse;
+
+const parseYmdToUtcMs = (value: string): number | undefined => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return undefined;
+  const ms = Date.UTC(year, month - 1, day);
+  const d = new Date(ms);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return undefined;
+  return ms;
+};
+
+const getNightsBetween = (startDate: string, endDate: string): number => {
+  const startMs = parseYmdToUtcMs(startDate);
+  const endMs = parseYmdToUtcMs(endDate);
+  if (startMs === undefined || endMs === undefined) return 0;
+  const diff = (endMs - startMs) / (24 * 60 * 60 * 1000);
+  return Number.isInteger(diff) && diff > 0 ? diff : 0;
+};
+
+const normalizeForSearch = (value: string): string =>
+  value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const isExtendedStayRatePlan = (ratePlan: RateSummary): boolean => {
+  const names = [ratePlan.ratePlanNamePublic, ratePlan.ratePlanNamePrivate].filter(
+    (v): v is string => typeof v === "string" && v.trim().length > 0
+  );
+  const haystack = normalizeForSearch(names.join(" "));
+  if (haystack.includes("estadia extendida")) return true;
+  if (haystack.includes("extended stay")) return true;
+  if (haystack.includes("long stay")) return true;
+
+  const derivedType = typeof ratePlan.derivedType === "string" ? normalizeForSearch(ratePlan.derivedType) : "";
+  if (derivedType.includes("extended")) return true;
+
+  return false;
+};
 
 const buildInventoryIndex = (
   rooms: Array<{ roomTypeID: string; roomID: string; roomName: string }>
@@ -266,26 +310,30 @@ export const RoomTypesShowService = {
     endDate: string;
     maxGuests?: number;
     promoCode?: string;
-  }): Promise<RoomTypeModel[]> {
-    const baseModels = await this.listRoomTypesBase({ startDate: params.startDate, endDate: params.endDate, maxGuests: params.maxGuests });
-    const roomTypeIDs = baseModels.map((m) => m.roomTypeID);
+    }): Promise<RoomTypeModel[]> {
+      const baseModels = await this.listRoomTypesBase({ startDate: params.startDate, endDate: params.endDate, maxGuests: params.maxGuests });
+      const roomTypeIDs = baseModels.map((m) => m.roomTypeID);
+      const nights = getNightsBetween(params.startDate, params.endDate);
 
-    const pricingIndex = await fetchRatePlansIndex({
-      roomTypeIDs,
-      startDate: params.startDate,
-      endDate: params.endDate,
+      const pricingIndex = await fetchRatePlansIndex({
+        roomTypeIDs,
+        startDate: params.startDate,
+        endDate: params.endDate,
       promoCode: params.promoCode,
     });
 
-    return baseModels.map((m) => {
-      const pricing = pricingIndex.get(m.roomTypeID);
-      return {
-        ...m,
-        pricing: {
-          baseRate: pricing?.baseRate,
-          ratePlans: pricing?.ratePlans ?? [],
-        },
-      };
-    });
-  },
-};
+      return baseModels.map((m) => {
+        const pricing = pricingIndex.get(m.roomTypeID);
+        const rawRatePlans = pricing?.ratePlans ?? [];
+        const ratePlans =
+          nights >= EXTENDED_STAY_MIN_NIGHTS ? rawRatePlans : rawRatePlans.filter((rp) => !isExtendedStayRatePlan(rp));
+        return {
+          ...m,
+          pricing: {
+            baseRate: pricing?.baseRate,
+            ratePlans,
+          },
+        };
+      });
+    },
+  };
