@@ -1,14 +1,15 @@
 import { ReservationService, type JsonObject } from "./reservation.service";
 import { ItemsService } from "./items.service";
+import { GuestsService } from "./guests.service";
 
-  type BookReservationRequest = {
-    propertyID?: string | null;
-    sourceID?: string | null;
-    thirdPartyIdentifier?: string | null;
-    startDate: string;
-    endDate: string;
-    guestFirstName: string;
-    guestLastName: string;
+type BookReservationRequest = {
+  propertyID?: string | null;
+  sourceID?: string | null;
+  thirdPartyIdentifier?: string | null;
+  startDate: string;
+  endDate: string;
+  guestFirstName: string;
+  guestLastName: string;
   guestGender: "M" | "F" | "N/A";
   guestCountry: string;
   guestZip?: string | null;
@@ -18,7 +19,14 @@ import { ItemsService } from "./items.service";
   rooms: Array<{ roomTypeID: string; quantity: number; roomID?: string; roomRateID?: string }>;
   adults?: Array<{ roomTypeID: string; quantity: number; roomID?: string }>;
   children?: Array<{ roomTypeID: string; quantity: number; roomID?: string }>;
-  extraGuests?: unknown[] | null;
+  extraGuests?: Array<{
+    guestFirstName: string;
+    guestLastName: string;
+    guestGender: "M" | "F" | "N/A";
+    guestCountry: string;
+    guestEmail: string;
+    guestPhone?: string | null;
+  }> | null;
   paymentMethod?: unknown;
   cardToken?: unknown;
   paymentAuthorizationCode?: unknown;
@@ -29,6 +37,14 @@ import { ItemsService } from "./items.service";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const asTrimmedString = (value: unknown): string | undefined => (typeof value === "string" ? value.trim() : undefined);
+const asStringOrNumber = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const s = value.trim();
+    return s.length ? s : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+};
 const asInt = (value: unknown): number | undefined => {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value === "string" && value.trim().length) {
@@ -153,40 +169,75 @@ const getReservationIDFromResponse = (response: JsonObject): string | undefined 
           .filter((v): v is { roomTypeID: string; quantity: number; roomID?: string } => !!v)
       : undefined;
 
-    const childrenRaw = rawBody.children;
-    const children = Array.isArray(childrenRaw)
-      ? childrenRaw
-          .map((v) => {
-            if (!isRecord(v)) return null;
-            const roomTypeID = asTrimmedString(v.roomTypeID);
-            const quantity = asInt(v.quantity);
-            if (!roomTypeID || quantity === undefined || quantity < 0) return null;
-            const roomID = asTrimmedString(v.roomID);
-            return {
-              roomTypeID,
-              quantity,
-              ...(roomID ? { roomID } : {}),
-            } as { roomTypeID: string; quantity: number; roomID?: string };
-          })
-          .filter((v): v is { roomTypeID: string; quantity: number; roomID?: string } => !!v)
-      : undefined;
+      const childrenRaw = rawBody.children;
+      const children = Array.isArray(childrenRaw)
+        ? childrenRaw
+            .map((v) => {
+              if (!isRecord(v)) return null;
+              const roomTypeID = asTrimmedString(v.roomTypeID);
+              const quantity = asInt(v.quantity);
+              if (!roomTypeID || quantity === undefined || quantity < 0) return null;
+              const roomID = asTrimmedString(v.roomID);
+              return {
+                roomTypeID,
+                quantity,
+                ...(roomID ? { roomID } : {}),
+              } as { roomTypeID: string; quantity: number; roomID?: string };
+            })
+            .filter((v): v is { roomTypeID: string; quantity: number; roomID?: string } => !!v)
+        : undefined;
 
-    const mascota = rawBody.mascota === null ? null : asInt(rawBody.mascota);
-    if (mascota !== undefined && mascota !== null && mascota < 0) throw new Error("mascota inválido");
+      const mascota = rawBody.mascota === null ? null : asInt(rawBody.mascota);
+      if (mascota !== undefined && mascota !== null && mascota < 0) throw new Error("mascota inválido");
 
-    const reservationBody: JsonObject = {
-      propertyID: asTrimmedString(rawBody.propertyID),
-      sourceID,
-      thirdPartyIdentifier: asTrimmedString(rawBody.thirdPartyIdentifier),
-      startDate,
-      endDate,
-      guestFirstName,
-      guestLastName,
-      guestGender,
-      guestCountry,
-      guestZip: asTrimmedString(rawBody.guestZip),
-      guestEmail,
-        guestPhone: asTrimmedString(rawBody.guestPhone),
+      const extraGuestsRaw = rawBody.extraGuests;
+      const extraGuests =
+        extraGuestsRaw === undefined || extraGuestsRaw === null
+          ? undefined
+          : Array.isArray(extraGuestsRaw)
+            ? extraGuestsRaw.map((v, idx) => {
+                if (!isRecord(v)) throw new Error(`extraGuests[${idx}] inválido`);
+                const extraGuestFirstName = asTrimmedString(v.guestFirstName);
+                const extraGuestLastName = asTrimmedString(v.guestLastName);
+                const extraGuestGender = asTrimmedString(v.guestGender) as BookReservationRequest["guestGender"] | undefined;
+                const extraGuestCountry = asTrimmedString(v.guestCountry);
+                const extraGuestEmail = asTrimmedString(v.guestEmail);
+                const extraGuestPhone = asStringOrNumber(v.guestPhone);
+
+                if (!extraGuestFirstName) throw new Error(`extraGuests[${idx}].guestFirstName es requerido`);
+                if (!extraGuestLastName) throw new Error(`extraGuests[${idx}].guestLastName es requerido`);
+                if (!extraGuestEmail) throw new Error(`extraGuests[${idx}].guestEmail es requerido`);
+                if (!extraGuestCountry) throw new Error(`extraGuests[${idx}].guestCountry es requerido`);
+                if (extraGuestGender !== "M" && extraGuestGender !== "F" && extraGuestGender !== "N/A") {
+                  throw new Error(`extraGuests[${idx}].guestGender inválido`);
+                }
+
+                return {
+                  guestFirstName: extraGuestFirstName,
+                  guestLastName: extraGuestLastName,
+                  guestGender: extraGuestGender,
+                  guestCountry: extraGuestCountry,
+                  guestEmail: extraGuestEmail,
+                  guestPhone: extraGuestPhone ?? null,
+                };
+              })
+            : (() => {
+                throw new Error("extraGuests inválido");
+              })();
+
+      const reservationBody: JsonObject = {
+        propertyID: asTrimmedString(rawBody.propertyID),
+        sourceID,
+        thirdPartyIdentifier: asTrimmedString(rawBody.thirdPartyIdentifier),
+        startDate,
+        endDate,
+        guestFirstName,
+        guestLastName,
+        guestGender,
+        guestCountry,
+        guestZip: asTrimmedString(rawBody.guestZip),
+        guestEmail,
+        guestPhone: asStringOrNumber(rawBody.guestPhone) ?? null,
         guestRequirements: null,
         estimatedArrivalTime: asTrimmedString(rawBody.estimatedArrivalTime) || "14:00",
         rooms,
@@ -203,15 +254,36 @@ const getReservationIDFromResponse = (response: JsonObject): string | undefined 
         sendEmailConfirmation: true,
       };
 
-    const reservation = await ReservationService.postReservation(reservationBody);
+      const reservation = await ReservationService.postReservation(reservationBody);
 
-    if (!mascota || mascota <= 0) {
-      return { reservation };
-    }
+      const shouldPostGuests = !!(extraGuests && extraGuests.length > 0);
+      const shouldPostMascota = !!(mascota && mascota > 0);
+      const shouldResolveReservationID = shouldPostGuests || shouldPostMascota;
 
-    const reservationID = getReservationIDFromResponse(reservation);
-      if (!reservationID) {
+      const reservationID = shouldResolveReservationID ? getReservationIDFromResponse(reservation) : undefined;
+      if (shouldResolveReservationID && !reservationID) {
         throw new Error("No se pudo obtener reservationID de la respuesta de postReservation");
+      }
+
+      if (shouldPostGuests && reservationID) {
+        await Promise.all(
+          extraGuests!.map((guest) =>
+            GuestsService.postGuest({
+              propertyID: "297440",
+              reservationID,
+              guestFirstName: guest.guestFirstName,
+              guestLastName: guest.guestLastName,
+              guestGender: guest.guestGender,
+              guestCountry: guest.guestCountry,
+              guestEmail: guest.guestEmail,
+              guestPhone: guest.guestPhone ?? null,
+            })
+          )
+        );
+      }
+
+      if (!shouldPostMascota || !reservationID) {
+        return { reservation };
       }
 
       const nights = getNightsBetween(startDate, endDate);
@@ -232,6 +304,6 @@ const getReservationIDFromResponse = (response: JsonObject): string | undefined 
         payments: null,
       });
 
-    return { reservation, mascotaItem };
-  },
-};
+      return { reservation, mascotaItem };
+    },
+  };
