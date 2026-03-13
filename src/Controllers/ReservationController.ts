@@ -1,5 +1,8 @@
 import type { Request, Response } from "express";
 import { ReservationService } from "../services/reservation.service";
+import { GuestsService } from "../services/guests.service";
+import { ReservationsBookService } from "../services/reservationsBook.service";
+import { ItemsService } from "../services/items.service";
 import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudbedsError } from "../utils/http";
 
 /**
@@ -454,13 +457,16 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudb
  *           schema:
  *             type: object
  *             example:
+ *               propertyID: "string"
  *               sourceID: "string"
+ *               thirdPartyIdentifier: "string"
  *               startDate: "YYYY-MM-DD"
  *               endDate: "YYYY-MM-DD"
  *               guestFirstName: "string"
  *               guestLastName: "string"
  *               guestGender: "M | F | N/A"
  *               guestCountry: "PE"
+ *               guestZip: "string"
  *               guestEmail: "correo@ejemplo.com"
  *               guestPhone: "+51999999999"
  *               estimatedArrivalTime: "14:00"
@@ -488,16 +494,88 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudb
  *               paymentMethod: "cash"
  *               cardToken: "string"
  *               paymentAuthorizationCode: "string"
+ *               customFields:
+ *                 - fieldName: "DNI"
+ *                   fieldValue: "12345678"
+ *                 - fieldName: "Ciudaddeprocedencia"
+ *                   fieldValue: "Lima"
  *               promoCode: "string"
  *     responses:
- *       501:
- *         description: No implementado
+ *       200:
+ *         description: OK
+ *       400:
+ *         description: Body invÃ¡lido
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
  *                 error: { type: string }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ */
+
+/**
+ * @openapi-disabled
+ * /api/reservations/{reservationID}/guests:
+ *   post:
+ *     tags: [Reservations]
+ *     summary: Agregar huÃ©sped a reserva (Cloudbeds postGuest)
+ *     parameters:
+ *       - in: path
+ *         name: reservationID
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Body que se transforma a x-www-form-urlencoded para Cloudbeds postGuest
+ *             example:
+ *               propertyID: null
+ *               guestFirstName: "Juan"
+ *               guestLastName: "Perez"
+ *               guestGender: "N/A"
+ *               guestEmail: "juan.perez@example.com"
+ *               guestPhone: null
+ *               guestCellPhone: null
+ *               guestAddress1: null
+ *               guestAddress2: null
+ *               guestCity: null
+ *               guestCountry: "PE"
+ *               guestState: null
+ *               guestZip: null
+ *               guestBirthDate: null
+ *               guestDocumentType: null
+ *               guestDocumentNumber: null
+ *               guestDocumentIssueDate: null
+ *               guestDocumentIssuingCountry: null
+ *               guestDocumentExpirationDate: null
+ *               guestRequirements: null
+ *               customFields: null
+ *               guestNote: null
+ *               reservationNote: null
+ *               guestCompanyName: null
+ *               guestCompanyTaxId: null
+ *               guestTaxId: null
+ *     responses:
+ *       200:
+ *         description: Respuesta Cloudbeds (raw JSON)
+ *       400:
+ *         description: ParÃ¡metros invÃ¡lidos
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       502:
+ *         description: Error Cloudbeds
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  */
 export class ReservationController {
   static getSources = async (req: Request, res: Response): Promise<void> => {
@@ -591,7 +669,56 @@ export class ReservationController {
   };
 
   static bookReservation = async (_req: Request, res: Response): Promise<void> => {
-    res.status(501).json({ error: "No implementado" });
+    try {
+      const result = await ReservationsBookService.book(_req.body);
+      res.json({ success: true, ...result });
+    } catch (error) {
+      if (error instanceof ReservationService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
+        return;
+      }
+      if (error instanceof GuestsService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
+        return;
+      }
+      if (error instanceof ItemsService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Error interno del servidor";
+      if (message.includes("requerido") || message.includes("inválido") || message.includes("incluir")) {
+        res.status(400).json({ error: message });
+        return;
+      }
+      res.status(500).json({ error: message });
+    }
+  };
+
+  static postGuest = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const reservationID = asOptionalString(req.params.reservationID);
+      if (!reservationID) {
+        res.status(400).json({ error: "reservationID es requerido" });
+        return;
+      }
+
+      if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+        res.status(400).json({ error: "Body invÃ¡lido (se espera JSON objeto)" });
+        return;
+      }
+
+      const data = await GuestsService.postGuest({
+        ...(req.body as Record<string, unknown>),
+        reservationID,
+      });
+      res.json(data);
+    } catch (error) {
+      if (error instanceof GuestsService.CloudbedsHttpError) {
+        res.status(error.status || 502).json({ error: formatCloudbedsError(error) });
+        return;
+      }
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
   };
 
   static postReservation = async (req: Request, res: Response): Promise<void> => {

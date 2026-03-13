@@ -55,8 +55,21 @@ app.use("/api/rooms", roomsRoutes);
 app.use("/api/taxes", taxesRoutes);
 app.use("/api/items", itemsRoutes);
 
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (
+    err &&
+    typeof err === "object" &&
+    (err as { type?: unknown }).type === "entity.parse.failed" &&
+    typeof (err as { status?: unknown }).status === "number"
+  ) {
+    res.status(400).json({ error: "JSON inválido (revisa comas finales y comillas dobles)" });
+    return;
+  }
+
+  next(err);
+});
+
 
 // mostrar los errores bonitos
-
 
 export default app;
