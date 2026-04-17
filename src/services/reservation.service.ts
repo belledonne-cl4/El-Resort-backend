@@ -69,6 +69,8 @@ export type GetSourcesParams = {
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
+export type PutReservationBody = JsonObject;
+
 export type PostReservationNoteBody = {
   propertyID?: string | null;
   reservationID: string;
@@ -172,10 +174,10 @@ export const ReservationService = {
     return response;
   },
 
-  async postReservation(body: JsonObject): Promise<JsonObject> {
-    const client = getClient();
+    async postReservation(body: JsonObject): Promise<JsonObject> {
+      const client = getClient();
 
-    const form = new URLSearchParams();
+      const form = new URLSearchParams();
     for (let [key, value] of Object.entries(body)) {
       if (value === undefined) continue;
       if (value === null) continue;
@@ -197,13 +199,41 @@ export const ReservationService = {
       },
     });
 
-    return response;
-  },
+      return response;
+    },
 
-  async postReservationNote(body: PostReservationNoteBody): Promise<JsonObject> {
-    const client = getClient();
+  async putReservation(body: PutReservationBody): Promise<JsonObject> {
+      const client = getClient();
 
-    const form = new URLSearchParams();
+      const form = new URLSearchParams();
+      for (let [key, value] of Object.entries(body)) {
+        if (value === undefined) continue;
+        if (value === null) continue;
+
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+          form.set(key, String(value));
+          continue;
+        }
+
+        form.set(key, JSON.stringify(value));
+      }
+
+      const response = await client.requestJson<JsonObject>({
+        method: "PUT",
+        path: "/putReservation",
+        data: form.toString(),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      });
+
+      return response;
+    },
+
+    async postReservationNote(body: PostReservationNoteBody): Promise<JsonObject> {
+      const client = getClient();
+
+      const form = new URLSearchParams();
     form.set("reservationID", body.reservationID);
     form.set("reservationNote", body.reservationNote);
     if (body.propertyID) form.set("propertyID", body.propertyID);

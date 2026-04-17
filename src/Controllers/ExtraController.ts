@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import Extra from "../models/Extras";
+import { ExtrasService } from "../services/extras.service";
 
 /**
  * @openapi
@@ -42,6 +43,25 @@ import Extra from "../models/Extras";
  *           application/json:
  *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  *
+ * /api/extras/grouped:
+ *   get:
+ *     tags: [Extras]
+ *     summary: Listar extras agrupados por grupo
+ *     responses:
+ *       200:
+ *         description: Listado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   grupo: { type: string, nullable: true }
+ *                   extras:
+ *                     type: array
+ *                     items: { $ref: '#/components/schemas/Extra' }
+  *
  * /api/extras/{id}:
  *   get:
  *     tags: [Extras]
@@ -153,6 +173,17 @@ export class ExtraController {
     } catch (error) {
       console.log(error);
       res.status(500).json({ message: "Error al crear el extra", error });
+    }
+  };
+
+  //Obtener todos los extras agrupados por grupo
+  static getExtrasGroupedByGrupo = async (_req: Request, res: Response) => {
+    try {
+      const blocks = await ExtrasService.getExtrasGroupedByGrupo();
+      res.json(blocks);
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({ message: "Error al obtener los extras", error });
     }
   };
 

@@ -1,6 +1,9 @@
 import { RoomsService, type JsonObject } from "./rooms.service";
 
 import { type RoomTypeModel } from "../models/RoomType.model";
+import type { RoomTypeReducedDetailModel, RoomTypeReducedModel } from "../models/RoomTypeReduced.model";
+import RoomTypeLocalSpecs from "../models/RoomTypeLocalSpecs";
+import mongoose from "mongoose";
 import { RatesService } from "./rates.service";
 import type { RateSummary } from "../models/RateSummary";
 
@@ -112,7 +115,11 @@ const buildInventoryIndex = (
   return index;
 };
 
-const fetchAllRoomsForDates = async (params: { startDate: string; endDate: string }): Promise<Array<{ roomTypeID: string; roomID: string; roomName: string }>> => {
+const fetchAllRoomsForDates = async (params: {
+  startDate: string;
+  endDate: string;
+  roomTypeID?: string;
+}): Promise<Array<{ roomTypeID: string; roomID: string; roomName: string }>> => {
   const pageSize = 50;
   const maxPages = 200;
 
@@ -124,6 +131,7 @@ const fetchAllRoomsForDates = async (params: { startDate: string; endDate: strin
     const raw = await RoomsService.getRooms({
       startDate: params.startDate,
       endDate: params.endDate,
+      roomTypeID: params.roomTypeID,
       includeRoomRelations: 0,
       pageNumber,
       pageSize,
@@ -248,6 +256,62 @@ const fetchRatePlansIndex = async (params: {
   return index;
 };
 
+type LocalSpecsNormalized = { bathroomsCount: number; bedrooms: Array<{ number: number; description?: string; photos: string[] }> };
+
+const normalizeLocalBedrooms = (value: unknown): LocalSpecsNormalized["bedrooms"] => {
+  if (!Array.isArray(value)) return [];
+  const normalized: LocalSpecsNormalized["bedrooms"] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const number = typeof record.number === "number" && Number.isFinite(record.number) ? record.number : undefined;
+    if (!number || number < 1) continue;
+    const description = typeof record.description === "string" && record.description.trim().length > 0 ? record.description.trim() : undefined;
+    const photos = Array.isArray(record.photos) ? record.photos.filter((p): p is string => typeof p === "string") : [];
+    normalized.push({ number, description, photos });
+  }
+  normalized.sort((a, b) => a.number - b.number);
+  return normalized;
+};
+
+const buildDefaultLocalSpecs = (): LocalSpecsNormalized => ({
+  bathroomsCount: 1,
+  bedrooms: [{ number: 1, photos: [] }],
+});
+
+const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<string, LocalSpecsNormalized>> => {
+  const index = new Map<string, LocalSpecsNormalized>();
+
+  if (mongoose.connection.readyState !== 1) return index;
+
+  const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((v) => typeof v === "string" && v.trim().length > 0);
+  if (uniqueIDs.length === 0) return index;
+
+  const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs } })
+    .select({ roomTypeID: 1, bathroomsCount: 1, bedrooms: 1 })
+    .lean();
+
+  for (const doc of docs) {
+    if (!doc || typeof doc.roomTypeID !== "string") continue;
+    const bathroomsCount = typeof doc.bathroomsCount === "number" && Number.isFinite(doc.bathroomsCount) ? doc.bathroomsCount : undefined;
+    const bedrooms = normalizeLocalBedrooms((doc as unknown as Record<string, unknown>).bedrooms);
+
+    // Backward-compat: si hay docs viejos con bedroomsCount pero sin bedrooms[]
+    const legacyBedroomsCount = typeof (doc as unknown as Record<string, unknown>).bedroomsCount === "number" ? (doc as unknown as Record<string, unknown>).bedroomsCount : undefined;
+    const derivedBedrooms =
+      bedrooms.length > 0
+        ? bedrooms
+        : typeof legacyBedroomsCount === "number" && Number.isFinite(legacyBedroomsCount) && legacyBedroomsCount > 0
+          ? Array.from({ length: Math.floor(legacyBedroomsCount) }, (_, i) => ({ number: i + 1, photos: [] as string[] }))
+          : [];
+
+    if (bathroomsCount === undefined) continue;
+    index.set(doc.roomTypeID, { bathroomsCount, bedrooms: derivedBedrooms });
+  }
+
+  return index;
+};
+
 export const RoomTypesShowService = {
   async listRoomTypesBase(params: { startDate: string; endDate: string; maxGuests?: number }): Promise<RoomTypeModel[]> {
     const rooms = await fetchAllRoomsForDates({ startDate: params.startDate, endDate: params.endDate });
@@ -336,4 +400,142 @@ export const RoomTypesShowService = {
         };
       });
     },
+
+  async getRoomTypeWithPricing(params: {
+    roomTypeID: string;
+    startDate: string;
+    endDate: string;
+    maxGuests?: number;
+    promoCode?: string;
+  }): Promise<RoomTypeModel | null> {
+    const rooms = await fetchAllRoomsForDates({
+      startDate: params.startDate,
+      endDate: params.endDate,
+      roomTypeID: params.roomTypeID,
+    });
+
+    const inventoryByRoomType = buildInventoryIndex(rooms);
+    const inventory = inventoryByRoomType.get(params.roomTypeID) ?? { roomIDs: [], roomNames: [] };
+    if (inventory.roomIDs.length === 0) return null;
+
+    const details = await fetchRoomTypesDetails({ roomTypeIDs: [params.roomTypeID], maxGuests: params.maxGuests });
+    const rt = details[0];
+    if (!rt) return null;
+
+    const roomTypeID = asString(rt.roomTypeID);
+    const roomTypeName = asString(rt.roomTypeName);
+    if (!roomTypeID || !roomTypeName) return null;
+
+    const model: RoomTypeModel = {
+      roomTypeID,
+      presentation: {
+        roomTypeName,
+        roomTypeNameShort: asString(rt.roomTypeNameShort),
+        roomTypeDescription: asString(rt.roomTypeDescription),
+        roomTypePhotos: asStringArray(rt.roomTypePhotos) ?? [],
+        maxGuests: asNumber(rt.maxGuests),
+        adultsIncluded: asNumber(rt.adultsIncluded),
+        childrenIncluded: asNumber(rt.childrenIncluded),
+        roomTypeFeatures: normalizeRoomTypeFeatures(rt.roomTypeFeatures),
+      },
+      inventory: {
+        roomIDs: inventory.roomIDs,
+        roomNames: inventory.roomNames,
+        totalUnits: asNumber(rt.roomTypeUnits),
+        linkedRoomIDs: asStringArray(rt.linkedRoomIDs),
+        linkedRoomTypeIDs: asStringArray(rt.linkedRoomTypeIDs),
+        linkedRoomTypeQty: Array.isArray(rt.linkedRoomTypeQty)
+          ? rt.linkedRoomTypeQty
+              .map((v) => asRecord(v))
+              .filter((v): v is Record<string, unknown> => !!v)
+              .map((v) => ({
+                roomTypeID: asString(v.roomTypeID) ?? "",
+                roomQty: asNumber(v.roomQty) ?? 0,
+              }))
+              .filter((v) => v.roomTypeID.length > 0 && v.roomQty > 0)
+          : undefined,
+      },
+      pricing: {
+        ratePlans: [],
+      },
+    };
+
+    const pricingIndex = await fetchRatePlansIndex({
+      roomTypeIDs: [roomTypeID],
+      startDate: params.startDate,
+      endDate: params.endDate,
+      promoCode: params.promoCode,
+    });
+
+    const pricing = pricingIndex.get(roomTypeID);
+    const nights = getNightsBetween(params.startDate, params.endDate);
+    const rawRatePlans = pricing?.ratePlans ?? [];
+    const ratePlans = nights >= EXTENDED_STAY_MIN_NIGHTS ? rawRatePlans : rawRatePlans.filter((rp) => !isExtendedStayRatePlan(rp));
+
+    return {
+      ...model,
+      pricing: {
+        baseRate: pricing?.baseRate,
+        ratePlans,
+      },
+    };
+  },
+
+  toReducedModel(
+    model: RoomTypeModel,
+    localSpecs?: LocalSpecsNormalized
+  ): RoomTypeReducedModel {
+    const ofertaDelMes = model.pricing.ratePlans.find((rp) => (rp.ratePlanNamePublic ?? "").trim() === "Oferta del Mes");
+    const resolvedSpecs = localSpecs && localSpecs.bedrooms.length > 0 ? localSpecs : localSpecs ? { ...localSpecs, bedrooms: buildDefaultLocalSpecs().bedrooms } : buildDefaultLocalSpecs();
+
+    return {
+      roomTypeID: model.roomTypeID,
+      roomTypeName: model.presentation.roomTypeName,
+      roomTypePhotos: model.presentation.roomTypePhotos,
+      maxGuests: model.presentation.maxGuests,
+      bedroomsCount: resolvedSpecs.bedrooms.length || 1,
+      bathroomsCount: resolvedSpecs.bathroomsCount ?? 1,
+      pricing: {
+        totalRate: model.pricing.baseRate?.totalRate,
+        ofertaDelMesRoomRate: ofertaDelMes?.roomRate,
+      },
+    };
+  },
+
+  toReducedDetailModel(model: RoomTypeModel, localSpecs?: LocalSpecsNormalized): RoomTypeReducedDetailModel {
+    const resolvedSpecs = localSpecs && localSpecs.bedrooms.length > 0 ? localSpecs : localSpecs ? { ...localSpecs, bedrooms: buildDefaultLocalSpecs().bedrooms } : buildDefaultLocalSpecs();
+    const base = this.toReducedModel(model, resolvedSpecs);
+
+    return {
+      ...base,
+      roomTypeDescription: model.presentation.roomTypeDescription,
+      roomTypeFeatures: model.presentation.roomTypeFeatures,
+      bedrooms: resolvedSpecs.bedrooms,
+    };
+  },
+
+  async listRoomTypesReducedWithPricing(params: {
+    startDate: string;
+    endDate: string;
+    maxGuests?: number;
+    promoCode?: string;
+  }): Promise<RoomTypeReducedModel[]> {
+    const full = await this.listRoomTypesWithPricing(params);
+    const specsIndex = await fetchRoomTypeLocalSpecsIndex(full.map((m) => m.roomTypeID));
+    return full.map((m) => this.toReducedModel(m, specsIndex.get(m.roomTypeID)));
+  },
+
+  async getRoomTypeReducedDetailWithPricing(params: {
+    roomTypeID: string;
+    startDate: string;
+    endDate: string;
+    maxGuests?: number;
+    promoCode?: string;
+  }): Promise<RoomTypeReducedDetailModel | null> {
+    const full = await this.getRoomTypeWithPricing(params);
+    if (!full) return null;
+
+    const specsIndex = await fetchRoomTypeLocalSpecsIndex([params.roomTypeID]);
+    return this.toReducedDetailModel(full, specsIndex.get(params.roomTypeID));
+  },
   };

@@ -464,15 +464,16 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudb
  *               endDate: "YYYY-MM-DD"
  *               guestFirstName: "string"
  *               guestLastName: "string"
- *               guestGender: "M | F | N/A"
- *               guestCountry: "PE"
- *               guestZip: "string"
- *               guestEmail: "correo@ejemplo.com"
- *               guestPhone: "+51999999999"
- *               estimatedArrivalTime: "14:00"
- *               mascota: 0
- *               rooms:
- *                 - roomTypeID: "string"
+   *               guestGender: "M | F | N/A"
+   *               guestCountry: "PE"
+   *               guestZip: "string"
+   *               guestEmail: "correo@ejemplo.com"
+   *               guestPhoneCountryCode: "+51"
+   *               guestPhone: "999999999"
+   *               estimatedArrivalTime: "14:00"
+   *               mascota: 0
+   *               rooms:
+   *                 - roomTypeID: "string"
  *                   quantity: 1
  *                   roomID: "string"
  *                   roomRateID: "string"
@@ -487,14 +488,15 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudb
  *               extraGuests:
  *                 - guestFirstName: "string"
  *                   guestLastName: "string"
- *                   guestGender: "M | F | N/A"
- *                   guestCountry: "PE"
- *                   guestEmail: "correo@ejemplo.com"
- *                   guestPhone: "+51999999999"
- *               paymentMethod: "cash"
- *               cardToken: "string"
- *               paymentAuthorizationCode: "string"
- *               customFields:
+   *                   guestGender: "M | F | N/A"
+   *                   guestCountry: "PE"
+   *                   guestEmail: "correo@ejemplo.com"
+   *                   guestPhoneCountryCode: "+51"
+   *                   guestPhone: "999999999"
+   *               paymentMethod: "cash"
+   *               cardToken: "string"
+   *               paymentAuthorizationCode: "string"
+   *               customFields:
  *                 - fieldName: "DNI"
  *                   fieldValue: "12345678"
  *                 - fieldName: "Ciudaddeprocedencia"
@@ -519,7 +521,7 @@ import { asOptionalBoolean, asOptionalInt, asOptionalString, clamp, formatCloudb
  */
 
 /**
- * @openapi-disabled
+ * @openapiDisabled
  * /api/reservations/{reservationID}/guests:
  *   post:
  *     tags: [Reservations]

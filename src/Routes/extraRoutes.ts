@@ -20,6 +20,9 @@ router.post(
 //Obtener todos los extras
 router.get("/", ExtraController.getAllExtras);
 
+//Obtener todos los extras agrupados por grupo
+router.get("/grouped", ExtraController.getExtrasGroupedByGrupo);
+
 //Obtener un extra por id
 router.get(
   "/:id",

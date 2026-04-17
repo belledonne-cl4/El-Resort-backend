@@ -5,21 +5,34 @@ import morgan from "morgan";
 import helmet from "helmet";
 import _ from "lodash";
 import { corsConfig } from "./config/cors";
-// import { connectDB } from "./config/db";
+import { connectDB } from "./config/db";
 import swaggerUi from "swagger-ui-express";
 import { createSwaggerSpec } from "./config/swagger";
 import authRoutes from "./Routes/authRoutes";
 import extraRoutes from "./Routes/extraRoutes";
+import areaRoutes from "./Routes/areaRoutes";
 import reservationRoutes from "./Routes/reservationRoutes";
 import customFieldsRoutes from "./Routes/customFieldsRoutes";
 import ratesRoutes from "./Routes/ratesRoutes";
 import roomsRoutes from "./Routes/roomsRoutes";
 import taxesRoutes from "./Routes/taxesRoutes";
 import itemsRoutes from "./Routes/itemsRoutes";
+import izipayRoutes from "./Routes/izipayRoutes";
+import roomTypeLocalSpecsRoutes from "./Routes/roomTypeLocalSpecsRoutes";
+import condominiosRoutes from "./Routes/condominiosRoutes";
+import retirosRoutes from "./Routes/retirosRoutes";
+import textosLandingPageRoutes from "./Routes/textosLandingPageRoutes";
+import landingPageSectionsRoutes from "./Routes/landingPageSectionsRoutes";
+import translateRoutes from "./Routes/translateRoutes";
+import landingMediaRoutes from "./Routes/landingMediaRoutes";
 
 dotenv.config();
 
-// connectDB();
+if (process.env.DATABASE_URL) {
+  void connectDB();
+} else {
+  console.warn("DATABASE_URL no configurado; MongoDB no se conectarÃ¡.");
+}
 
 const swaggerSpec = createSwaggerSpec();
 
@@ -44,16 +57,38 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get("/api/docs/openapi.json", (_req, res) => {
+  res.json(swaggerSpec);
+});
+
+app.use(
+  "/api/docs",
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec, {
+    swaggerOptions: {
+      url: "/api/docs/openapi.json",
+      displayRequestDuration: true,
+    },
+  })
+);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/extras", extraRoutes);
+app.use("/api/areas", areaRoutes);
 app.use("/api/reservations", reservationRoutes);
 app.use("/api/customfields", customFieldsRoutes);
 app.use("/api/rates", ratesRoutes);
 app.use("/api/rooms", roomsRoutes);
 app.use("/api/taxes", taxesRoutes);
 app.use("/api/items", itemsRoutes);
+app.use("/api/izipay", izipayRoutes);
+app.use("/api/room-type-specs", roomTypeLocalSpecsRoutes);
+app.use("/api/condominios", condominiosRoutes);
+app.use("/api/retiros", retirosRoutes);
+app.use("/api/textos-landing-page", textosLandingPageRoutes);
+app.use("/api/landing-page-sections", landingPageSectionsRoutes);
+app.use("/api/landing-media", landingMediaRoutes);
+app.use("/api/translate", translateRoutes);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (

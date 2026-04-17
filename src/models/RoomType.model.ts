@@ -1,5 +1,6 @@
 import { RateSummary } from './RateSummary';
 
+// falta un video por roomtypemodel y la cantidad de baños y dormitorios
 
 export type RoomTypeModel = {
   roomTypeID: string;
