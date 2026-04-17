@@ -17,6 +17,19 @@ router.post(
 
 router.get("/", LandingMediaController.list);
 
+router.get("/lookup", LandingMediaController.getByIdentifier);
+
+router.get("/storage/files", LandingMediaController.listStorageFiles);
+router.delete("/storage/files", LandingMediaController.deleteStorageFiles);
+
+router.patch(
+  "/",
+  upload.any(),
+  body("payload").optional().isString().withMessage("payload debe ser string JSON en multipart"),
+  handleInputErrors,
+  LandingMediaController.updateById
+);
+
 router.get(
   "/:id",
   param("id").isMongoId().withMessage("id debe ser un ObjectId valido"),

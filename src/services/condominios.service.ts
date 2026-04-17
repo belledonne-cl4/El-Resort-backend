@@ -33,6 +33,12 @@ export const CondominiosService = {
     return { id: doc._id.toString(), name: doc.name, mapUrl: doc.mapUrl };
   },
 
+  async getMapUrlById(id: string): Promise<string | null> {
+    const doc = await Condominio.findById(id).select("mapUrl").lean();
+    if (!doc) return null;
+    return doc.mapUrl ?? null;
+  },
+
   async listAll(): Promise<CondominioDto[]> {
     const docs = await Condominio.find({}).lean();
     return docs.map((d) => ({ id: d._id.toString(), name: d.name, mapUrl: d.mapUrl }));

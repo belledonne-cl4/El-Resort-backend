@@ -20,6 +20,10 @@ export type CreateLandingMediaInput = {
 
 export type UpdateLandingMediaInput = Partial<CreateLandingMediaInput>;
 
+export type LandingMediaUpdateSelector =
+  | { tipo: "GLOBAL"; nombre: string }
+  | { tipo: "SECCION"; sectionId: string };
+
 export type LandingMediaConsolidatedDto = {
   globals: Record<string, unknown>;
   sections: Record<string, unknown>;
@@ -43,6 +47,17 @@ const toDto = (doc: {
   updatedAt: doc.updatedAt,
 });
 
+const toUpdateObject = (input: UpdateLandingMediaInput): Record<string, unknown> => {
+  const update: Record<string, unknown> = {};
+
+  if (input.tipo !== undefined) update.tipo = input.tipo;
+  if (input.nombre !== undefined) update.nombre = input.nombre;
+  if (input.sectionId !== undefined) update.sectionId = input.sectionId ? new mongoose.Types.ObjectId(input.sectionId) : null;
+  if (input.json !== undefined) update.json = input.json;
+
+  return update;
+};
+
 export const LandingMediaService = {
   async create(input: CreateLandingMediaInput): Promise<LandingMediaDto> {
     const doc = await LandingMedia.create({
@@ -56,12 +71,7 @@ export const LandingMediaService = {
   },
 
   async updateById(id: string, input: UpdateLandingMediaInput): Promise<LandingMediaDto | null> {
-    const update: Record<string, unknown> = {};
-
-    if (input.tipo !== undefined) update.tipo = input.tipo;
-    if (input.nombre !== undefined) update.nombre = input.nombre;
-    if (input.sectionId !== undefined) update.sectionId = input.sectionId ? new mongoose.Types.ObjectId(input.sectionId) : null;
-    if (input.json !== undefined) update.json = input.json;
+    const update = toUpdateObject(input);
 
     const doc = await LandingMedia.findByIdAndUpdate(id, update, {
       new: true,
@@ -70,6 +80,46 @@ export const LandingMediaService = {
 
     if (!doc) return null;
     return toDto(doc);
+  },
+
+  async updateByIdentifier(selector: LandingMediaUpdateSelector, input: UpdateLandingMediaInput): Promise<LandingMediaDto | null> {
+    const where: Record<string, unknown> = { tipo: selector.tipo };
+
+    if (selector.tipo === "SECCION") {
+      where.sectionId = new mongoose.Types.ObjectId(selector.sectionId);
+    } else {
+      where.nombre = selector.nombre;
+      where.sectionId = null;
+    }
+
+    const docs = await LandingMedia.find(where).select({ _id: 1 }).limit(2).lean();
+    if (docs.length === 0) return null;
+
+    if (docs.length > 1) {
+      throw Object.assign(new Error("Identificador ambiguo, usa update por id"), { status: 409 });
+    }
+
+    return this.updateById(String(docs[0]._id), input);
+  },
+
+  async getByIdentifier(selector: LandingMediaUpdateSelector): Promise<LandingMediaDto | null> {
+    const where: Record<string, unknown> = { tipo: selector.tipo };
+
+    if (selector.tipo === "SECCION") {
+      where.sectionId = new mongoose.Types.ObjectId(selector.sectionId);
+    } else {
+      where.nombre = selector.nombre;
+      where.sectionId = null;
+    }
+
+    const docs = await LandingMedia.find(where).limit(2).lean();
+    if (docs.length === 0) return null;
+
+    if (docs.length > 1) {
+      throw Object.assign(new Error("Identificador ambiguo, usa get por id"), { status: 409 });
+    }
+
+    return toDto(docs[0]);
   },
 
   async getById(id: string): Promise<LandingMediaDto | null> {

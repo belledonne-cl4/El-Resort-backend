@@ -114,10 +114,12 @@ const normalizeJsonMediaNodes = async (
       }
 
       const file = files[0];
+      const requestedKind = detectMediaKind({ src: normalizedSrcInput, currentKind: value.kind });
       const uploaded = await SupabaseStorageService.uploadFile({
         fileBuffer: file.buffer,
         originalName: file.originalname,
         mimeType: file.mimetype,
+        mediaKind: requestedKind,
       });
 
       uploadedFileIds.push(uploaded.fileId);
@@ -193,6 +195,75 @@ const parseJsonField = (value: unknown): JsonLike => {
     throw Object.assign(new Error("json es requerido"), { status: 400 });
   }
   return value as JsonLike;
+};
+
+const parsePositiveIntQuery = (value: unknown, field: string, fallback: number): number => {
+  if (value === undefined || value === null || value === "") return fallback;
+
+  const normalized = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(normalized);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw Object.assign(new Error(`${field} debe ser un entero > 0`), { status: 400 });
+  }
+
+  return parsed;
+};
+
+const parseBooleanQuery = (value: unknown, fallback: boolean): boolean => {
+  if (value === undefined || value === null || value === "") return fallback;
+
+  const normalized = String(Array.isArray(value) ? value[0] : value)
+    .trim()
+    .toLowerCase();
+
+  if (["1", "true", "yes", "si"].includes(normalized)) return true;
+  if (["0", "false", "no"].includes(normalized)) return false;
+
+  throw Object.assign(new Error("signed debe ser booleano (true/false o 1/0)"), { status: 400 });
+};
+
+const parseStorageDeletePaths = (value: unknown): string[] => {
+  if (!value || typeof value !== "object") {
+    throw Object.assign(new Error("Body invalido"), { status: 400 });
+  }
+
+  const body = value as { path?: unknown; paths?: unknown };
+  const collected: string[] = [];
+
+  if (typeof body.path === "string") {
+    const normalized = body.path.trim();
+    if (!normalized) {
+      throw Object.assign(new Error("path no puede ser vacio"), { status: 400 });
+    }
+    collected.push(normalized);
+  }
+
+  if (Array.isArray(body.paths)) {
+    for (const item of body.paths) {
+      if (typeof item !== "string") {
+        throw Object.assign(new Error("paths debe contener solo strings"), { status: 400 });
+      }
+
+      const normalized = item.trim();
+      if (!normalized) {
+        throw Object.assign(new Error("paths no puede contener valores vacios"), { status: 400 });
+      }
+
+      collected.push(normalized);
+    }
+  }
+
+  const normalizedPaths = Array.from(new Set(collected));
+  if (normalizedPaths.length === 0) {
+    throw Object.assign(new Error("Debes enviar path o paths[]"), { status: 400 });
+  }
+
+  if (normalizedPaths.length > 1000) {
+    throw Object.assign(new Error("No puedes eliminar mas de 1000 archivos por request"), { status: 400 });
+  }
+
+  return normalizedPaths;
 };
 
 /**
@@ -275,6 +346,186 @@ const parseJsonField = (value: unknown): JsonLike => {
  *                 sections:
  *                   type: object
  *                   additionalProperties: true
+ * /api/landing-media/lookup:
+ *   get:
+ *     tags: [LandingMedia]
+ *     summary: Obtener configuración específica por tipo
+ *     description: |
+ *       Si tipo=SECCION, requiere sectionId.
+ *       Si tipo=GLOBAL, requiere nombre.
+ *     parameters:
+ *       - in: query
+ *         name: tipo
+ *         required: true
+ *         schema: { type: string, enum: [SECCION, GLOBAL] }
+ *       - in: query
+ *         name: sectionId
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: nombre
+ *         required: false
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               additionalProperties: true
+ *       400:
+ *         description: Error de validación
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       404:
+ *         description: No encontrado
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ * /api/landing-media/storage/files:
+ *   get:
+ *     tags: [LandingMedia]
+ *     summary: Listar archivos existentes del bucket de Supabase con URL
+ *     description: |
+ *       Retorna archivos del bucket en forma paginada.
+ *       - signed=false: retorna publicUrl (requiere bucket público para acceso directo).
+ *       - signed=true: retorna signedUrl temporal (útil para bucket privado).
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: pageSize
+ *         required: false
+ *         schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+ *       - in: query
+ *         name: prefix
+ *         required: false
+ *         schema: { type: string }
+ *       - in: query
+ *         name: signed
+ *         required: false
+ *         schema: { type: boolean, default: false }
+ *       - in: query
+ *         name: expiresIn
+ *         required: false
+ *         schema: { type: integer, minimum: 1, maximum: 604800, default: 3600 }
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     bucket: { type: string }
+ *                     page: { type: integer }
+ *                     pageSize: { type: integer }
+ *                     prefix: { type: string }
+ *                     signed: { type: boolean }
+ *                     expiresIn: { type: integer, nullable: true }
+ *                     total: { type: integer }
+ *                     count: { type: integer }
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           name: { type: string }
+ *                           path: { type: string }
+ *                           url: { type: string }
+ *       400:
+ *         description: Error de validación
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *   delete:
+ *     tags: [LandingMedia]
+ *     summary: Eliminar imágenes/archivos del bucket de Supabase
+ *     description: |
+ *       Elimina uno o varios archivos por path relativo al bucket.
+ *       Puedes enviar `path` (string) o `paths` (array de strings).
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               path:
+ *                 type: string
+ *                 example: carpeta/imagen-123.webp
+ *               paths:
+ *                 type: array
+ *                 items: { type: string }
+ *                 example: ["carpeta/imagen-1.png", "carpeta/imagen-2.webp"]
+ *     responses:
+ *       200:
+ *         description: Eliminado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     bucket: { type: string }
+ *                     deleted: { type: integer }
+ *                     fileIds:
+ *                       type: array
+ *                       items: { type: string }
+ *       400:
+ *         description: Error de validación
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *   patch:
+ *     tags: [LandingMedia]
+ *     summary: Actualizar configuración por identificación inicial
+ *     description: |
+ *       Para tipo=SECCION se identifica por sectionId.
+ *       Para tipo=GLOBAL se identifica por nombre.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [payload]
+ *             properties:
+ *               payload:
+ *                 type: string
+ *                 description: |
+ *                   JSON string con { tipo, sectionId|nombre, json }.
+ *                   Para tipo=SECCION usa sectionId; para GLOBAL usa nombre.
+ *               mediaFiles:
+ *                 type: array
+ *                 description: Archivos en campos mediaFiles[<key>]
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Actualizado
+ *       400:
+ *         description: Error de validación
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       404:
+ *         description: No encontrado
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  * /api/landing-media/{id}:
  *   get:
  *     tags: [LandingMedia]
@@ -404,6 +655,43 @@ export class LandingMediaController {
     }
   };
 
+  static listStorageFiles = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const page = parsePositiveIntQuery(req.query.page, "page", 1);
+      const pageSize = parsePositiveIntQuery(req.query.pageSize, "pageSize", 100);
+      const signed = parseBooleanQuery(req.query.signed, false);
+      const expiresIn = parsePositiveIntQuery(req.query.expiresIn, "expiresIn", 3600);
+      const prefix = typeof req.query.prefix === "string" ? req.query.prefix : "";
+
+      const data = await SupabaseStorageService.listFilesWithUrls({
+        page,
+        pageSize,
+        prefix,
+        signed,
+        expiresIn,
+      });
+
+      res.json({ success: true, data });
+    } catch (error) {
+      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const message = error instanceof Error ? error.message : "Error interno del servidor";
+      res.status(status).json({ error: message });
+    }
+  };
+
+  static deleteStorageFiles = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const fileIds = parseStorageDeletePaths(req.body);
+      const data = await SupabaseStorageService.deleteFiles({ fileIds });
+
+      res.json({ success: true, data });
+    } catch (error) {
+      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const message = error instanceof Error ? error.message : "Error interno del servidor";
+      res.status(status).json({ error: message });
+    }
+  };
+
   static getById = async (req: Request, res: Response): Promise<void> => {
     try {
       if (mongoose.connection.readyState !== 1) {
@@ -422,6 +710,42 @@ export class LandingMediaController {
     }
   };
 
+  static getByIdentifier = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        res.status(503).json({ error: "Base de datos no conectada" });
+        return;
+      }
+
+      const tipo = parseTipo(req.query.tipo);
+
+      let doc = null;
+      if (tipo === "SECCION") {
+        const sectionId = parseSectionId(req.query.sectionId);
+        if (!sectionId) {
+          res.status(400).json({ error: "sectionId es requerido para tipo SECCION" });
+          return;
+        }
+
+        doc = await LandingMediaService.getByIdentifier({ tipo: "SECCION", sectionId });
+      } else {
+        const nombre = parseNombre(req.query.nombre);
+        doc = await LandingMediaService.getByIdentifier({ tipo: "GLOBAL", nombre });
+      }
+
+      if (!doc) {
+        res.status(404).json({ error: "No encontrado" });
+        return;
+      }
+
+      res.json({ [doc.nombre]: doc.json });
+    } catch (error) {
+      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const message = error instanceof Error ? error.message : "Error interno del servidor";
+      res.status(status).json({ error: message });
+    }
+  };
+
   static updateById = async (req: Request, res: Response): Promise<void> => {
     const uploadedFileIds: string[] = [];
 
@@ -434,6 +758,7 @@ export class LandingMediaController {
       const payload = parsePayload(req);
       const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
       const filesByKey = normalizeFilesMap(files);
+      const idParam = typeof req.params.id === "string" ? req.params.id.trim() : "";
 
       const updatePayload: {
         tipo?: LandingMediaTipo;
@@ -442,9 +767,6 @@ export class LandingMediaController {
         json?: JsonLike;
       } = {};
 
-      if (payload.tipo !== undefined) updatePayload.tipo = parseTipo(payload.tipo);
-      if (payload.nombre !== undefined) updatePayload.nombre = parseNombre(payload.nombre);
-      if (payload.sectionId !== undefined) updatePayload.sectionId = parseSectionId(payload.sectionId);
       if (payload.json !== undefined) {
         updatePayload.json = await normalizeJsonMediaNodes(parseJsonField(payload.json), filesByKey, uploadedFileIds);
       }
@@ -454,7 +776,28 @@ export class LandingMediaController {
         throw Object.assign(new Error(`Hay archivos sin referencia en json: ${orphanKeys.join(", ")}`), { status: 400 });
       }
 
-      const updated = await LandingMediaService.updateById(req.params.id, updatePayload);
+      let updated = null;
+
+      if (idParam) {
+        if (payload.tipo !== undefined) updatePayload.tipo = parseTipo(payload.tipo);
+        if (payload.nombre !== undefined) updatePayload.nombre = parseNombre(payload.nombre);
+        if (payload.sectionId !== undefined) updatePayload.sectionId = parseSectionId(payload.sectionId);
+        updated = await LandingMediaService.updateById(idParam, updatePayload);
+      } else {
+        const tipo = parseTipo(payload.tipo);
+
+        if (tipo === "SECCION") {
+          const sectionId = parseSectionId(payload.sectionId);
+          if (!sectionId) {
+            throw Object.assign(new Error("sectionId es requerido para actualizar SECCION"), { status: 400 });
+          }
+          updated = await LandingMediaService.updateByIdentifier({ tipo: "SECCION", sectionId }, updatePayload);
+        } else {
+          const nombre = parseNombre(payload.nombre);
+          updated = await LandingMediaService.updateByIdentifier({ tipo: "GLOBAL", nombre }, updatePayload);
+        }
+      }
+
       if (!updated) {
         res.status(404).json({ error: "No encontrado" });
         return;

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import RoomTypeLocalSpecs from "../models/RoomTypeLocalSpecs";
 import mongoose from "mongoose";
 import { SupabaseStorageService } from "../services/supabaseStorage.service";
+import { CondominiosService } from "../services/condominios.service";
 
 /**
  * @openapi
@@ -271,7 +272,10 @@ export class RoomTypeLocalSpecsController {
         return;
       }
 
-      res.json({ success: true, data: doc });
+      const condominioID = doc.condominioID ? String(doc.condominioID) : null;
+      const mapUrl = condominioID ? await CondominiosService.getMapUrlById(condominioID) : null;
+
+      res.json({ success: true, data: { ...doc, condominioID, mapUrl } });
     } catch (_error) {
       res.status(500).json({ error: "Error interno del servidor" });
     }

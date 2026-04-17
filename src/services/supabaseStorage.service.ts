@@ -12,10 +12,49 @@ export interface UploadResponse {
   url: string;
 }
 
+export interface ListStorageFilesInput {
+  page?: number;
+  pageSize?: number;
+  prefix?: string;
+  signed?: boolean;
+  expiresIn?: number;
+}
+
+export interface StorageFileWithUrl {
+  name: string;
+  path: string;
+  url: string;
+  id?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  lastAccessedAt?: string;
+  contentType?: string;
+  size?: number;
+}
+
+export interface ListStorageFilesResult {
+  bucket: string;
+  page: number;
+  pageSize: number;
+  prefix: string;
+  signed: boolean;
+  expiresIn: number | null;
+  total: number;
+  count: number;
+  data: StorageFileWithUrl[];
+}
+
+export interface DeleteStorageFilesResult {
+  bucket: string;
+  deleted: number;
+  fileIds: string[];
+}
+
 export interface UploadFileInput {
   fileBuffer: Buffer;
   originalName: string;
   mimeType?: string;
+  mediaKind?: "image" | "video" | "file";
   imageConstraints?: ImageConstraintsOverrides;
 }
 
@@ -126,6 +165,40 @@ const getImageDimensions = (buffer: Buffer): ImageDimensions | null => {
   return getPngDimensions(buffer) ?? getJpegDimensions(buffer) ?? getWebpDimensions(buffer);
 };
 
+const isSvgMimeType = (mimeType?: string): boolean => {
+  return typeof mimeType === "string" && mimeType.trim().toLowerCase() === "image/svg+xml";
+};
+
+const enforceSvgConstraints = ({
+  buffer,
+  contextLabel,
+  constraints,
+}: {
+  buffer: Buffer;
+  contextLabel: string;
+  constraints?: ImageConstraintsOverrides;
+}): void => {
+  if (!Buffer.isBuffer(buffer)) {
+    throw Object.assign(new Error("Archivo invalido"), { status: 400 });
+  }
+
+  const { config } = getCachedSupabaseClientFromEnv();
+  const maxImageBytes = constraints?.maxImageBytes ?? config.maxImageBytes;
+
+  if (!Number.isFinite(maxImageBytes) || maxImageBytes <= 0) {
+    throw Object.assign(new Error(`${contextLabel}: maxImageBytes invalido`), { status: 400 });
+  }
+
+  if (buffer.length > maxImageBytes) {
+    throw Object.assign(new Error(`${contextLabel}: Excede bytes`), { status: 400 });
+  }
+
+  const text = buffer.toString("utf8", 0, Math.min(buffer.length, 2048)).trimStart();
+  if (!/^<\?xml\b|^<svg\b/i.test(text)) {
+    throw Object.assign(new Error("SVG invalido"), { status: 400 });
+  }
+};
+
 const enforceImageConstraints = ({
   buffer,
   contextLabel,
@@ -172,7 +245,173 @@ const getExtensionFromName = (fileName: string, fallback: string): string => {
   return extension.replace(/[^a-z0-9]/g, "") || fallback;
 };
 
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "m4v", "avi", "mkv"]);
+
+const detectUploadMediaKind = ({
+  mediaKind,
+  mimeType,
+  originalName,
+}: {
+  mediaKind?: "image" | "video" | "file";
+  mimeType?: string;
+  originalName: string;
+}): "image" | "video" | "file" => {
+  if (mediaKind === "video") return "video";
+  if (mediaKind === "image") return "image";
+
+  const normalizedMime = typeof mimeType === "string" ? mimeType.trim().toLowerCase() : "";
+  if (normalizedMime.startsWith("video/")) return "video";
+  if (normalizedMime.startsWith("image/")) return "image";
+
+  const extension = getExtensionFromName(originalName, "");
+  if (VIDEO_EXTENSIONS.has(extension)) return "video";
+
+  return "file";
+};
+
+const normalizePrefix = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/^\/+/, "").replace(/\/+$/, "");
+};
+
+const isFolderEntry = (item: {
+  id?: string | null;
+  metadata?: unknown;
+}): boolean => {
+  const hasId = typeof item.id === "string" && item.id.length > 0;
+  if (!hasId) return true;
+
+  const metadata = item.metadata;
+  if (!metadata || typeof metadata !== "object") return true;
+
+  const hasMimetype = typeof (metadata as { mimetype?: unknown }).mimetype === "string";
+
+  return !hasMimetype;
+};
+
+const listAllFilesFromPrefix = async ({
+  client,
+  bucket,
+  prefix,
+}: {
+  client: ReturnType<typeof getCachedSupabaseClientFromEnv>["client"];
+  bucket: string;
+  prefix: string;
+}): Promise<Array<{ path: string; item: { name: string; id?: string | null; metadata?: unknown; created_at?: string; updated_at?: string; last_accessed_at?: string } }>> => {
+  const queue: string[] = [prefix];
+  const files: Array<{ path: string; item: { name: string; id?: string | null; metadata?: unknown; created_at?: string; updated_at?: string; last_accessed_at?: string } }> = [];
+
+  while (queue.length > 0) {
+    const currentPrefix = queue.shift() ?? "";
+    let offset = 0;
+
+    while (true) {
+      const { data, error } = await client.storage.from(bucket).list(currentPrefix, {
+        limit: 1000,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+
+      if (error) throw error;
+
+      const entries = data ?? [];
+      if (entries.length === 0) break;
+
+      for (const entry of entries) {
+        if (!entry?.name) continue;
+
+        const fullPath = currentPrefix ? `${currentPrefix}/${entry.name}` : entry.name;
+
+        if (isFolderEntry(entry)) {
+          queue.push(fullPath);
+          continue;
+        }
+
+        files.push({ path: fullPath, item: entry });
+      }
+
+      if (entries.length < 1000) break;
+      offset += 1000;
+    }
+  }
+
+  return files;
+};
+
 export const SupabaseStorageService = {
+  async listFilesWithUrls({ page = 1, pageSize = 100, prefix = "", signed = false, expiresIn = 3600 }: ListStorageFilesInput = {}): Promise<ListStorageFilesResult> {
+    const { client, config } = getCachedSupabaseClientFromEnv();
+
+    if (!Number.isInteger(page) || page < 1) {
+      throw Object.assign(new Error("page debe ser un entero >= 1"), { status: 400 });
+    }
+
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+      throw Object.assign(new Error("pageSize debe ser un entero entre 1 y 1000"), { status: 400 });
+    }
+
+    if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 60 * 60 * 24 * 7) {
+      throw Object.assign(new Error("expiresIn debe ser un entero entre 1 y 604800"), { status: 400 });
+    }
+
+    const normalizedPrefix = normalizePrefix(prefix);
+    const allFiles = await listAllFilesFromPrefix({
+      client,
+      bucket: config.bucket,
+      prefix: normalizedPrefix,
+    });
+
+    allFiles.sort((a, b) => a.path.localeCompare(b.path));
+
+    const total = allFiles.length;
+    const offset = (page - 1) * pageSize;
+    const entries = allFiles.slice(offset, offset + pageSize);
+
+    const mappedData = await Promise.all(
+      entries.map(async ({ path: fullPath, item }) => {
+
+        let url = "";
+        if (signed) {
+          const signedUrlResult = await client.storage.from(config.bucket).createSignedUrl(fullPath, expiresIn);
+          if (signedUrlResult.error) throw signedUrlResult.error;
+          url = signedUrlResult.data.signedUrl;
+        } else {
+          const { data: publicUrlData } = client.storage.from(config.bucket).getPublicUrl(fullPath);
+          url = publicUrlData.publicUrl;
+        }
+
+        const metadata = item.metadata && typeof item.metadata === "object" ? (item.metadata as Record<string, unknown>) : null;
+        const metadataMimetype = metadata && typeof metadata.mimetype === "string" ? metadata.mimetype : undefined;
+        const metadataSize = metadata && typeof metadata.size === "number" ? metadata.size : undefined;
+
+        return {
+          name: item.name,
+          path: fullPath,
+          url,
+          id: item.id,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+          lastAccessedAt: item.last_accessed_at,
+          contentType: metadataMimetype,
+          size: metadataSize,
+        } satisfies StorageFileWithUrl;
+      })
+    );
+
+    return {
+      bucket: config.bucket,
+      page,
+      pageSize,
+      prefix: normalizedPrefix,
+      signed,
+      expiresIn: signed ? expiresIn : null,
+      total,
+      count: mappedData.length,
+      data: mappedData,
+    };
+  },
+
   async uploadImage({
     fileName,
     base64,
@@ -189,9 +428,14 @@ export const SupabaseStorageService = {
 
     const { client, config } = getCachedSupabaseClientFromEnv();
 
-    const normalizedBase64 = trimmed.replace(/^data:image\/\w+;base64,/, "");
+    const svgDataUri = /^data:image\/svg\+xml;base64,/i.test(trimmed);
+    const normalizedBase64 = trimmed.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "");
     const buffer = Buffer.from(normalizedBase64, "base64");
-    enforceImageConstraints({ buffer, contextLabel: "uploadImage", constraints: imageConstraints });
+    if (svgDataUri) {
+      enforceSvgConstraints({ buffer, contextLabel: "uploadImage", constraints: imageConstraints });
+    } else {
+      enforceImageConstraints({ buffer, contextLabel: "uploadImage", constraints: imageConstraints });
+    }
 
     const extension = getExtensionFromName(fileName, "jpg");
     const generatedName = `evidencia-${uuidv4()}.${extension}`;
@@ -207,16 +451,24 @@ export const SupabaseStorageService = {
     return { fileId: generatedName, url: data.publicUrl };
   },
 
-  async uploadFile({ fileBuffer, originalName, mimeType, imageConstraints }: UploadFileInput): Promise<UploadResponse> {
+  async uploadFile({ fileBuffer, originalName, mimeType, mediaKind, imageConstraints }: UploadFileInput): Promise<UploadResponse> {
     const { client, config } = getCachedSupabaseClientFromEnv();
 
-    const isImage = typeof mimeType === "string" && mimeType.startsWith("image/");
-    if (isImage) {
-      enforceImageConstraints({
-        buffer: fileBuffer,
-        contextLabel: "uploadFile",
-        constraints: imageConstraints,
-      });
+    const resolvedKind = detectUploadMediaKind({ mediaKind, mimeType, originalName });
+    if (resolvedKind === "image") {
+      if (isSvgMimeType(mimeType)) {
+        enforceSvgConstraints({
+          buffer: fileBuffer,
+          contextLabel: "uploadFile",
+          constraints: imageConstraints,
+        });
+      } else {
+        enforceImageConstraints({
+          buffer: fileBuffer,
+          contextLabel: "uploadFile",
+          constraints: imageConstraints,
+        });
+      }
     }
 
     const extension = getExtensionFromName(originalName, "dat");
@@ -229,6 +481,7 @@ export const SupabaseStorageService = {
         jpeg: "image/jpeg",
         png: "image/png",
         webp: "image/webp",
+        svg: "image/svg+xml",
       };
       contentType = mimeMap[extension] || "application/octet-stream";
     }
@@ -240,7 +493,15 @@ export const SupabaseStorageService = {
       upsert: false,
     });
 
-    if (error) throw error;
+    if (error) {
+      const message = typeof error.message === "string" ? error.message : "";
+      if (resolvedKind === "video" && /maximum allowed size/i.test(message)) {
+        throw Object.assign(new Error("El video excede el limite configurado en Supabase Storage (bucket). No es una restriccion del backend."), {
+          status: 413,
+        });
+      }
+      throw error;
+    }
 
     const { data } = client.storage.from(config.bucket).getPublicUrl(generatedName);
 
@@ -257,5 +518,30 @@ export const SupabaseStorageService = {
 
     const { error } = await client.storage.from(config.bucket).remove([fileId]);
     if (error) throw error;
+  },
+
+  async deleteFiles({ fileIds }: { fileIds: string[] }): Promise<DeleteStorageFilesResult> {
+    const normalizedIds = Array.from(
+      new Set(fileIds.map((value) => (typeof value === "string" ? value.trim() : "")).filter((value) => value.length > 0))
+    );
+
+    if (normalizedIds.length === 0) {
+      throw Object.assign(new Error("fileIds no puede estar vacio"), { status: 400 });
+    }
+
+    if (normalizedIds.length > 1000) {
+      throw Object.assign(new Error("fileIds excede el maximo de 1000 por request"), { status: 400 });
+    }
+
+    const { client, config } = getCachedSupabaseClientFromEnv();
+
+    const { error } = await client.storage.from(config.bucket).remove(normalizedIds);
+    if (error) throw error;
+
+    return {
+      bucket: config.bucket,
+      deleted: normalizedIds.length,
+      fileIds: normalizedIds,
+    };
   },
 };
