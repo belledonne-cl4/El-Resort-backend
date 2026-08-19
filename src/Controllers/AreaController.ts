@@ -1,23 +1,19 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import Area, { AREA_CATEGORIAS } from "../models/Area";
-import { SupabaseStorageService } from "../services/supabaseStorage.service";
+import { GcsStorageService } from "../services/csStorage.service";
 import { asOptionalString } from "../utils/http";
 
-const extractSupabaseFileIdFromPublicUrl = (value: string): string | null => {
+const extractGcsFileIdFromPublicUrl = (value: string): string | null => {
   if (typeof value !== "string" || !value.trim()) return null;
 
   try {
     const parsed = new URL(value);
-    const marker = "/storage/v1/object/public/";
+    const marker = `/${process.env.GCS_BUCKET_RESORT}/`;
     const markerIndex = parsed.pathname.indexOf(marker);
     if (markerIndex < 0) return null;
 
-    const suffix = parsed.pathname.slice(markerIndex + marker.length);
-    const firstSlash = suffix.indexOf("/");
-    if (firstSlash < 0) return null;
-
-    const fileId = decodeURIComponent(suffix.slice(firstSlash + 1));
+    const fileId = decodeURIComponent(parsed.pathname.slice(markerIndex + marker.length));
     return fileId || null;
   } catch {
     return null;
@@ -343,7 +339,7 @@ export class AreaController {
 
         if (files.length === 1) {
           const file = files[0];
-          const uploaded = await SupabaseStorageService.uploadFile({
+          const uploaded = await GcsStorageService.uploadFile({
             fileBuffer: file.buffer,
             originalName: file.originalname,
             mimeType: file.mimetype,
@@ -363,18 +359,18 @@ export class AreaController {
         const currentImage = area.imagenes[0];
         const staleFileIds = previousImages
           .filter((url) => url !== currentImage)
-          .map((url) => extractSupabaseFileIdFromPublicUrl(url))
+          .map((url) => extractGcsFileIdFromPublicUrl(url))
           .filter((value): value is string => typeof value === "string" && value.length > 0);
 
         if (staleFileIds.length > 0) {
-          await Promise.allSettled(staleFileIds.map((fileId) => SupabaseStorageService.deleteFile({ fileId })));
+          await Promise.allSettled(staleFileIds.map((fileId) => GcsStorageService.deleteFile({ fileId })));
         }
       }
 
       res.json({ success: true, data: area });
     } catch (_error) {
       if (uploadedFileIds.length > 0) {
-        await Promise.allSettled(uploadedFileIds.map((fileId) => SupabaseStorageService.deleteFile({ fileId })));
+        await Promise.allSettled(uploadedFileIds.map((fileId) => GcsStorageService.deleteFile({ fileId })));
       }
 
       res.status(500).json({ error: "Error interno del servidor" });
@@ -415,11 +411,11 @@ export class AreaController {
       await area.save();
 
       const fileIds = imagesToDelete
-        .map((url) => extractSupabaseFileIdFromPublicUrl(url))
+        .map((url) => extractGcsFileIdFromPublicUrl(url))
         .filter((value): value is string => typeof value === "string" && value.length > 0);
 
       if (fileIds.length > 0) {
-        await Promise.allSettled(fileIds.map((fileId) => SupabaseStorageService.deleteFile({ fileId })));
+        await Promise.allSettled(fileIds.map((fileId) => GcsStorageService.deleteFile({ fileId })));
       }
 
       res.json({

@@ -8,7 +8,7 @@ const defaultFileSizeBytes = (() => {
   return 20 * 1024 * 1024; // default 20 MB per file
 })();
 
-export const createMemoryUpload = (filesLimit = 10) =>
-  multer({ storage: multer.memoryStorage(), limits: { files: filesLimit, fileSize: defaultFileSizeBytes } });
+export const createMemoryUpload = (filesLimit = 10, fileSizeBytes = defaultFileSizeBytes) =>
+  multer({ storage: multer.memoryStorage(), limits: { files: filesLimit, fileSize: fileSizeBytes } });
 
 export default createMemoryUpload;

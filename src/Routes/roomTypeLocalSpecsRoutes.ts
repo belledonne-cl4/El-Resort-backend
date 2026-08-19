@@ -8,7 +8,9 @@ import { authenticate } from "../middleware/auth";
 import { hasRole } from "../middleware/hasRole";
 
 const router = Router();
-const upload = createMemoryUpload(50);
+// Este endpoint mezcla fotos y video en el mismo multipart; el límite global (pensado para fotos)
+// se queda corto para video, así que acá se sube a 200 MB por archivo sin tocar el resto del sitio.
+const upload = createMemoryUpload(50, 200 * 1024 * 1024);
 
 // Bulk update of `orden` for multiple roomTypeIDs
 router.put(
