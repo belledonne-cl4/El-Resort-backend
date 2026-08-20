@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { CondominiosService } from "../services/condominios.service";
-import { SupabaseStorageService } from "../services/supabaseStorage.service";
+import { GcsStorageService } from "../services/csStorage.service";
 
 /**
  * @openapi
@@ -107,10 +107,11 @@ export class CondominiosController {
         return;
       }
 
-      const uploaded = await SupabaseStorageService.uploadFile({
+      const uploaded = await GcsStorageService.uploadFile({
         fileBuffer: file.buffer,
         originalName: file.originalname,
         mimeType: file.mimetype,
+        mediaKind: "image",
       });
       uploadedFileId = uploaded.fileId;
 
@@ -118,7 +119,7 @@ export class CondominiosController {
       res.status(201).json({ success: true, data: created });
     } catch (error) {
       if (uploadedFileId) {
-        await Promise.allSettled([SupabaseStorageService.deleteFile({ fileId: uploadedFileId })]);
+        await Promise.allSettled([GcsStorageService.deleteFile({ fileId: uploadedFileId })]);
       }
 
       if (error && typeof error === "object" && (error as any).code === 11000) {
@@ -188,17 +189,18 @@ export class CondominiosController {
         return;
       }
 
-      const uploaded = await SupabaseStorageService.uploadFile({
+      const uploaded = await GcsStorageService.uploadFile({
         fileBuffer: file.buffer,
         originalName: file.originalname,
         mimeType: file.mimetype,
+        mediaKind: "image",
       });
       uploadedFileId = uploaded.fileId;
 
       const updated = await CondominiosService.updateById(id, name.trim(), uploaded.url);
       if (!updated) {
         if (uploadedFileId) {
-          await Promise.allSettled([SupabaseStorageService.deleteFile({ fileId: uploadedFileId })]);
+          await Promise.allSettled([GcsStorageService.deleteFile({ fileId: uploadedFileId })]);
         }
         res.status(404).json({ error: "No encontrado" });
         return;
@@ -206,7 +208,7 @@ export class CondominiosController {
       res.json({ success: true, data: updated });
     } catch (error) {
       if (uploadedFileId) {
-        await Promise.allSettled([SupabaseStorageService.deleteFile({ fileId: uploadedFileId })]);
+        await Promise.allSettled([GcsStorageService.deleteFile({ fileId: uploadedFileId })]);
       }
 
       if (error && typeof error === "object" && (error as any).code === 11000) {

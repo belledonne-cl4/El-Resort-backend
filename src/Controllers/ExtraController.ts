@@ -1,22 +1,18 @@
 import type { Request, Response } from "express";
 import Extra from "../models/Extras";
 import { ExtrasService } from "../services/extras.service";
-import { SupabaseStorageService } from "../services/supabaseStorage.service";
+import { GcsStorageService } from "../services/csStorage.service";
 
-const extractSupabaseFileIdFromPublicUrl = (value: string): string | null => {
+const extractGcsFileIdFromPublicUrl = (value: string): string | null => {
   if (typeof value !== "string" || !value.trim()) return null;
 
   try {
     const parsed = new URL(value);
-    const marker = "/storage/v1/object/public/";
+    const marker = `/${process.env.GCS_BUCKET_RESORT}/`;
     const markerIndex = parsed.pathname.indexOf(marker);
     if (markerIndex < 0) return null;
 
-    const suffix = parsed.pathname.slice(markerIndex + marker.length);
-    const firstSlash = suffix.indexOf("/");
-    if (firstSlash < 0) return null;
-
-    const fileId = decodeURIComponent(suffix.slice(firstSlash + 1));
+    const fileId = decodeURIComponent(parsed.pathname.slice(markerIndex + marker.length));
     return fileId || null;
   } catch {
     return null;
@@ -277,7 +273,7 @@ export class ExtraController {
 
         if (files.length === 1) {
           const file = files[0];
-          const uploaded = await SupabaseStorageService.uploadFile({
+          const uploaded = await GcsStorageService.uploadFile({
             fileBuffer: file.buffer,
             originalName: file.originalname,
             mimeType: file.mimetype,
@@ -304,18 +300,18 @@ export class ExtraController {
         const currentImage = Array.isArray(extra.imagenes) ? extra.imagenes[0] : undefined;
         const staleFileIds = previousImages
           .filter((url) => url !== currentImage)
-          .map((url) => extractSupabaseFileIdFromPublicUrl(url))
+          .map((url) => extractGcsFileIdFromPublicUrl(url))
           .filter((value): value is string => typeof value === "string" && value.length > 0);
 
         if (staleFileIds.length > 0) {
-          await Promise.allSettled(staleFileIds.map((fileId) => SupabaseStorageService.deleteFile({ fileId })));
+          await Promise.allSettled(staleFileIds.map((fileId) => GcsStorageService.deleteFile({ fileId })));
         }
       }
 
       res.send("Extra actualizado correctamente");
     } catch (error) {
       if (uploadedFileIds.length > 0) {
-        await Promise.allSettled(uploadedFileIds.map((fileId) => SupabaseStorageService.deleteFile({ fileId })));
+        await Promise.allSettled(uploadedFileIds.map((fileId) => GcsStorageService.deleteFile({ fileId })));
       }
 
       console.log(error);
