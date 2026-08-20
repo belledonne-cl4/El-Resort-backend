@@ -26,6 +26,7 @@ import landingPageSectionsRoutes from "./Routes/landingPageSectionsRoutes";
 import translateRoutes from "./Routes/translateRoutes";
 import landingMediaRoutes from "./Routes/landingMediaRoutes";
 import reviewsRoutes from "./Routes/reviewsRoutes";
+import beneficiosRoutes from "./Routes/beneficiosRoutes";
 
 dotenv.config();
 
@@ -90,6 +91,7 @@ app.use("/api/textos-landing-page", textosLandingPageRoutes);
 app.use("/api/landing-page-sections", landingPageSectionsRoutes);
 app.use("/api/landing-media", landingMediaRoutes);
 app.use("/api/reviews", reviewsRoutes);
+app.use("/api/beneficios", beneficiosRoutes);
 app.use("/api/translate", translateRoutes);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {

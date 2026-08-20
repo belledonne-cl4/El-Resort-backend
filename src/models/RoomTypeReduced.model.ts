@@ -15,9 +15,19 @@ export type RoomTypeReducedModel = {
   };
 };
 
+/** Beneficio del catálogo local: icono subido por el admin + texto en ambos idiomas. */
+export type RoomTypeBeneficio = {
+  _id: string;
+  nombre: { es: string; en: string | null };
+  iconUrl: string;
+  orden: number;
+};
+
 export type RoomTypeReducedDetailModel = RoomTypeReducedModel & {
   roomTypeDescription?: string;
+  /** Legado de Cloudbeds; solo se usa si `beneficios` viene vacío. */
   roomTypeFeatures?: string[];
+  beneficios?: RoomTypeBeneficio[];
   bedrooms?: RoomTypeBedroomSpec[];
   portadaMenu?: string | null;
 };

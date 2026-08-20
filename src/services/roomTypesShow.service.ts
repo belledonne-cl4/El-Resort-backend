@@ -6,6 +6,7 @@ import RoomTypeLocalSpecs from "../models/RoomTypeLocalSpecs";
 import mongoose from "mongoose";
 import { RatesService } from "./rates.service";
 import type { RateSummary } from "../models/RateSummary";
+import { BeneficiosService, type BeneficioDTO } from "./beneficios.service";
 
 const EXTENDED_STAY_MIN_NIGHTS = 4;
 
@@ -268,6 +269,8 @@ type LocalSpecsNormalized = {
   portadaMenu?: string | null;
   posicion_fotos_portadas?: Record<string, unknown> | null;
   orden?: number;
+  /** Catálogo local ya resuelto (icono + texto). Vacío = la ficha cae a `roomTypeFeatures` de Cloudbeds. */
+  beneficios?: BeneficioDTO[];
 };
 type LocalPricingNormalized = { totalRate?: number; ofertaDelMesRoomRate?: number };
 type ReducedMappingOptions = { applyFallbackDefaults?: boolean; portadaOnly?: boolean; includePortadaMenu?: boolean };
@@ -302,8 +305,16 @@ const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<
   if (uniqueIDs.length === 0) return index;
 
   const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs }, isActive: { $ne: false } })
-    .select({ roomTypeID: 1, bathroomsCount: 1, titleColor: 1, bedrooms: 1, portada: 1, portadaMenu: 1, posicion_fotos_portadas: 1, orden: 1 })
+    .select({ roomTypeID: 1, bathroomsCount: 1, titleColor: 1, bedrooms: 1, portada: 1, portadaMenu: 1, posicion_fotos_portadas: 1, orden: 1, beneficios: 1 })
     .lean();
+
+  // Una sola consulta al catálogo para todas las propiedades del listado.
+  const beneficiosByRoomType = await BeneficiosService.resolveForRoomTypes(
+    docs.map((doc) => ({
+      roomTypeID: String((doc as any).roomTypeID ?? ""),
+      beneficios: (doc as any).beneficios,
+    }))
+  );
 
   for (const doc of docs) {
     if (!doc || typeof doc.roomTypeID !== "string") continue;
@@ -327,7 +338,16 @@ const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<
     const rawPosicionFotos = (doc as any).posicion_fotos_portadas;
     const posicion_fotos_portadas: Record<string, unknown> | null = rawPosicionFotos && typeof rawPosicionFotos === "object" && !Array.isArray(rawPosicionFotos) ? (rawPosicionFotos as Record<string, unknown>) : null;
     const orden = typeof (doc as any).orden === "number" && Number.isFinite((doc as any).orden) ? (doc as any).orden : undefined;
-    index.set(doc.roomTypeID, { bathroomsCount, titleColor: (doc as any).titleColor ?? null, bedrooms: derivedBedrooms, portada, portadaMenu, posicion_fotos_portadas, orden });
+    index.set(doc.roomTypeID, {
+      bathroomsCount,
+      titleColor: (doc as any).titleColor ?? null,
+      bedrooms: derivedBedrooms,
+      portada,
+      portadaMenu,
+      posicion_fotos_portadas,
+      orden,
+      beneficios: beneficiosByRoomType.get(doc.roomTypeID) ?? [],
+    });
   }
 
   return index;
@@ -644,10 +664,15 @@ export const RoomTypesShowService = {
     result.portadaMenu = localSpecs && localSpecs.portadaMenu ? localSpecs.portadaMenu : null;
     result.posicion_fotos_portadas = localSpecs && (localSpecs as any).posicion_fotos_portadas ? (localSpecs as any).posicion_fotos_portadas : null;
 
+    // `beneficios` manda cuando la propiedad ya tiene catálogo asignado; si está vacío se
+    // sigue enviando `roomTypeFeatures` de Cloudbeds para que la ficha nunca quede sin beneficios.
+    const beneficios = localSpecs?.beneficios ?? [];
+
     return {
       ...result,
       roomTypeDescription: model.presentation.roomTypeDescription,
       roomTypeFeatures: model.presentation.roomTypeFeatures,
+      beneficios,
       ...(includeSpecs ? { bedrooms: resolvedSpecs.bedrooms } : {}),
     } as RoomTypeReducedDetailModel;
   },

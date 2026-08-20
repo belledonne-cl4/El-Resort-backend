@@ -24,6 +24,8 @@ export type RoomTypeLocalSpecsType = Document & {
     ofertaDelMesRoomRate?: number;
   };
   condominioID?: mongoose.Types.ObjectId;
+  /** Beneficios del catálogo que esta propiedad muestra. Vacío = se cae a los de Cloudbeds. */
+  beneficios: mongoose.Types.ObjectId[];
 };
 
 const RoomTypeLocalSpecsSchema: Schema = new Schema(
@@ -99,6 +101,12 @@ const RoomTypeLocalSpecsSchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Condominio",
       required: false,
+      index: true,
+    },
+    beneficios: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Beneficio" }],
+      required: true,
+      default: [],
       index: true,
     },
     isActive: {

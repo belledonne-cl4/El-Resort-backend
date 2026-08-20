@@ -7,6 +7,7 @@ import { CondominiosService } from "../services/condominios.service";
 import { parseIdiomaQuery } from "../utils/idioma";
 import { RoomTypeTranslationService } from "../services/roomTypeTranslation.service";
 import { RoomsService } from "../services/rooms.service";
+import { BeneficiosService } from "../services/beneficios.service";
 
 /**
  * @openapi
@@ -156,6 +157,8 @@ type UpdatePayload = {
     ofertaDelMesRoomRate?: number;
   };
   posicion_fotos_portadas?: Record<string, unknown> | null;
+  /** Ids del catálogo de beneficios; llega como array de strings desde el dashboard. */
+  beneficios?: string[];
 };
 
 const toHttpError = (status: number, message: string): Error & { status: number } => {
@@ -294,6 +297,30 @@ const normalizeStringArray = (value: unknown, fieldName: string): string[] | und
     .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+};
+
+/** Ids del catálogo de beneficios que la propiedad muestra; un array vacío los quita todos. */
+const normalizeBeneficios = (
+  value: unknown,
+  fieldName = "beneficios"
+): mongoose.Types.ObjectId[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw toHttpError(400, `${fieldName} debe ser un array de ObjectId`);
+  }
+
+  const ids = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  const invalid = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+  if (invalid.length > 0) {
+    throw toHttpError(400, `${fieldName} tiene ids invalidos: ${invalid.join(", ")}`);
+  }
+
+  // Set: el mismo beneficio marcado dos veces no debe duplicarse en la ficha.
+  return Array.from(new Set(ids)).map((id) => new mongoose.Types.ObjectId(id));
 };
 
 const normalizePricing = (
@@ -508,8 +535,18 @@ export class RoomTypeLocalSpecsController {
       const condominioID = doc.condominioID ? String(doc.condominioID) : null;
       const mapUrl = condominioID ? await CondominiosService.getMapUrlById(condominioID) : null;
 
+      // Beneficios del catálogo local (icono + texto) ya resueltos y ordenados.
+      const beneficiosResueltos = await BeneficiosService.resolveForRoomType(doc.beneficios);
+
       // Enriquecer con datos de CloudBeds
-      let enriched: Record<string, unknown> = { ...doc, condominioID, mapUrl };
+      let enriched: Record<string, unknown> = {
+        ...doc,
+        condominioID,
+        mapUrl,
+        // Los ids crudos siguen saliendo para que el dashboard marque los checkboxes.
+        beneficios: (doc.beneficios ?? []).map((id) => String(id)),
+        beneficiosResueltos,
+      };
       try {
         const cbMap = await RoomsService.getAllRoomTypesMap();
         const cb = cbMap.get(roomTypeID) as Record<string, unknown> | undefined;
@@ -584,6 +621,7 @@ export class RoomTypeLocalSpecsController {
       const portadaRaw = payload.portada;
       const portadaMenuRaw = payload.portadaMenu;
       const pricing = normalizePricing(payload.pricing, "pricing");
+      const beneficios = normalizeBeneficios(payload.beneficios, "beneficios");
       const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
       const { bedroomFilesByKey, videoFiles, extraGalleryImageFiles, portadaVideoImageFiles, portadaImageFiles, portadaMenuImageFiles } = normalizeFileMap(files);
 
@@ -601,6 +639,7 @@ export class RoomTypeLocalSpecsController {
         videoUrls === undefined &&
         extraGalleryImages === undefined &&
         pricing === undefined &&
+        beneficios === undefined &&
         videoFiles.length === 0 &&
         extraGalleryImageFiles.length === 0 &&
         portadaImageFiles.length === 0 &&
@@ -644,12 +683,14 @@ export class RoomTypeLocalSpecsController {
           totalRate?: number;
           ofertaDelMesRoomRate?: number;
         };
+        beneficios: mongoose.Types.ObjectId[];
       }> = {};
 
       if (bathroomsCount !== undefined) update.bathroomsCount = bathroomsCount;
       if (titleColor !== undefined) update.titleColor = typeof titleColor === "string" ? titleColor : null;
       if (condominioID !== undefined) update.condominioID = new mongoose.Types.ObjectId(condominioID);
       if (pricing !== undefined) update.pricing = pricing;
+      if (beneficios !== undefined) update.beneficios = beneficios;
 
       if (bedrooms.length > 0 || files.length > 0) {
         const normalizedBedrooms: Array<{ number: number; description?: string; photos: string[] }> = [];
