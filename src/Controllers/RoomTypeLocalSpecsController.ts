@@ -8,6 +8,7 @@ import { parseIdiomaQuery } from "../utils/idioma";
 import { RoomTypeTranslationService } from "../services/roomTypeTranslation.service";
 import { RoomsService } from "../services/rooms.service";
 import { BeneficiosService } from "../services/beneficios.service";
+import { RoomTypeLocalTextService } from "../services/roomTypeLocalText.service";
 
 /**
  * @openapi
@@ -159,6 +160,10 @@ type UpdatePayload = {
   posicion_fotos_portadas?: Record<string, unknown> | null;
   /** Ids del catálogo de beneficios; llega como array de strings desde el dashboard. */
   beneficios?: string[];
+  roomTypeName?: { es?: string; en?: string | null };
+  roomTypeDescription?: { es?: string; en?: string | null };
+  /** Huéspedes máximos local; `null` explícito borra el override y cae a Cloudbeds. */
+  maxGuests?: number | null;
 };
 
 const toHttpError = (status: number, message: string): Error & { status: number } => {
@@ -321,6 +326,31 @@ const normalizeBeneficios = (
 
   // Set: el mismo beneficio marcado dos veces no debe duplicarse en la ficha.
   return Array.from(new Set(ids)).map((id) => new mongoose.Types.ObjectId(id));
+};
+
+/** `{es, en}` para nombre/descripción locales; `en` se resuelve después vía traducción si no viene. */
+const normalizeTranslatableText = (
+  value: unknown,
+  fieldName: string
+): { es: string; en?: string | null } | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw toHttpError(400, `${fieldName} debe ser un objeto { es, en }`);
+  }
+
+  const record = value as { es?: unknown; en?: unknown };
+  if (typeof record.es !== "string") {
+    throw toHttpError(400, `${fieldName}.es debe ser un string`);
+  }
+
+  const en =
+    record.en === null || record.en === undefined
+      ? undefined
+      : typeof record.en === "string"
+        ? record.en
+        : undefined;
+
+  return { es: record.es.trim(), en };
 };
 
 const normalizePricing = (
@@ -551,10 +581,24 @@ export class RoomTypeLocalSpecsController {
         const cbMap = await RoomsService.getAllRoomTypesMap();
         const cb = cbMap.get(roomTypeID) as Record<string, unknown> | undefined;
         if (cb) {
-          enriched.roomTypeName = typeof cb.roomTypeName === "string" ? cb.roomTypeName : enriched.roomTypeName;
-          enriched.roomTypeDescription = typeof cb.roomTypeDescription === "string" ? cb.roomTypeDescription : enriched.roomTypeDescription;
+          // Local manda si tiene contenido; Cloudbeds solo se usa de respaldo, y se sintetiza
+          // en la misma forma {es, en} para que la respuesta sea siempre uniforme.
+          const localName = enriched.roomTypeName as { es?: string; en?: string | null } | undefined;
+          enriched.roomTypeName =
+            localName?.es && localName.es.trim().length > 0
+              ? localName
+              : { es: typeof cb.roomTypeName === "string" ? cb.roomTypeName : "", en: null };
+
+          const localDescription = enriched.roomTypeDescription as { es?: string; en?: string | null } | undefined;
+          enriched.roomTypeDescription =
+            localDescription?.es && localDescription.es.trim().length > 0
+              ? localDescription
+              : { es: typeof cb.roomTypeDescription === "string" ? cb.roomTypeDescription : "", en: null };
+
           enriched.roomTypePhotos = Array.isArray(cb.roomTypePhotos) ? cb.roomTypePhotos : enriched.roomTypePhotos;
-          enriched.maxGuests = typeof cb.maxGuests === "number" ? cb.maxGuests : enriched.maxGuests;
+          // Local manda si tiene un valor seteado; Cloudbeds solo se usa de respaldo.
+          const localMaxGuests = typeof enriched.maxGuests === "number" ? enriched.maxGuests : undefined;
+          enriched.maxGuests = localMaxGuests ?? (typeof cb.maxGuests === "number" ? cb.maxGuests : undefined);
           enriched.roomTypeFeatures = Array.isArray(cb.roomTypeFeatures) ? cb.roomTypeFeatures : enriched.roomTypeFeatures;
         }
       } catch {
@@ -622,6 +666,9 @@ export class RoomTypeLocalSpecsController {
       const portadaMenuRaw = payload.portadaMenu;
       const pricing = normalizePricing(payload.pricing, "pricing");
       const beneficios = normalizeBeneficios(payload.beneficios, "beneficios");
+      const roomTypeNamePayload = normalizeTranslatableText(payload.roomTypeName, "roomTypeName");
+      const roomTypeDescriptionPayload = normalizeTranslatableText(payload.roomTypeDescription, "roomTypeDescription");
+      const maxGuestsPayload = payload.maxGuests;
       const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
       const { bedroomFilesByKey, videoFiles, extraGalleryImageFiles, portadaVideoImageFiles, portadaImageFiles, portadaMenuImageFiles } = normalizeFileMap(files);
 
@@ -640,6 +687,9 @@ export class RoomTypeLocalSpecsController {
         extraGalleryImages === undefined &&
         pricing === undefined &&
         beneficios === undefined &&
+        roomTypeNamePayload === undefined &&
+        roomTypeDescriptionPayload === undefined &&
+        maxGuestsPayload === undefined &&
         videoFiles.length === 0 &&
         extraGalleryImageFiles.length === 0 &&
         portadaImageFiles.length === 0 &&
@@ -657,6 +707,15 @@ export class RoomTypeLocalSpecsController {
 
       if (bathroomsCount !== undefined && (!Number.isInteger(bathroomsCount) || bathroomsCount < 0)) {
         res.status(400).json({ error: "bathroomsCount debe ser un entero >= 0" });
+        return;
+      }
+
+      if (
+        maxGuestsPayload !== undefined &&
+        maxGuestsPayload !== null &&
+        (!Number.isInteger(maxGuestsPayload) || maxGuestsPayload < 1)
+      ) {
+        res.status(400).json({ error: "maxGuests debe ser un entero >= 1, o null para volver a Cloudbeds" });
         return;
       }
 
@@ -684,6 +743,9 @@ export class RoomTypeLocalSpecsController {
           ofertaDelMesRoomRate?: number;
         };
         beneficios: mongoose.Types.ObjectId[];
+        roomTypeName: { es: string; en: string | null };
+        roomTypeDescription: { es: string; en: string | null };
+        maxGuests: number | null;
       }> = {};
 
       if (bathroomsCount !== undefined) update.bathroomsCount = bathroomsCount;
@@ -691,6 +753,22 @@ export class RoomTypeLocalSpecsController {
       if (condominioID !== undefined) update.condominioID = new mongoose.Types.ObjectId(condominioID);
       if (pricing !== undefined) update.pricing = pricing;
       if (beneficios !== undefined) update.beneficios = beneficios;
+      if (roomTypeNamePayload !== undefined) {
+        update.roomTypeName = {
+          es: roomTypeNamePayload.es,
+          en: await RoomTypeLocalTextService.resolveEnglishText(roomTypeNamePayload.es, roomTypeNamePayload.en),
+        };
+      }
+      if (roomTypeDescriptionPayload !== undefined) {
+        update.roomTypeDescription = {
+          es: roomTypeDescriptionPayload.es,
+          en: await RoomTypeLocalTextService.resolveEnglishText(
+            roomTypeDescriptionPayload.es,
+            roomTypeDescriptionPayload.en
+          ),
+        };
+      }
+      if (maxGuestsPayload !== undefined) update.maxGuests = maxGuestsPayload;
 
       if (bedrooms.length > 0 || files.length > 0) {
         const normalizedBedrooms: Array<{ number: number; description?: string; photos: string[] }> = [];
@@ -1011,11 +1089,30 @@ export class RoomTypeLocalSpecsController {
         };
         base.pricingSource = (localTotalRate != null && localTotalRate > 0) ? "local" : "cloudbeds";
 
+        // Local manda si tiene contenido; Cloudbeds solo se usa de respaldo. A diferencia de
+        // getByRoomTypeID (editor, necesita {es, en}), este listado es de solo lectura para la
+        // tarjeta del dashboard — se aplana a string, el mismo contrato que ya tenía.
+        const localName = base.roomTypeName as { es?: string; en?: string | null } | undefined;
+        base.roomTypeName =
+          localName?.es && localName.es.trim().length > 0
+            ? localName.es
+            : typeof cb?.roomTypeName === "string"
+              ? cb.roomTypeName
+              : undefined;
+
+        const localDescription = base.roomTypeDescription as { es?: string; en?: string | null } | undefined;
+        base.roomTypeDescription =
+          localDescription?.es && localDescription.es.trim().length > 0
+            ? localDescription.es
+            : typeof cb?.roomTypeDescription === "string"
+              ? cb.roomTypeDescription
+              : undefined;
+
         if (!cb) return base;
-        base.roomTypeName = typeof cb.roomTypeName === "string" ? cb.roomTypeName : undefined;
-        base.roomTypeDescription = typeof cb.roomTypeDescription === "string" ? cb.roomTypeDescription : undefined;
         base.roomTypePhotos = Array.isArray(cb.roomTypePhotos) ? cb.roomTypePhotos : undefined;
-        base.maxGuests = typeof cb.maxGuests === "number" ? cb.maxGuests : undefined;
+        // Local manda si tiene un valor seteado; Cloudbeds solo se usa de respaldo.
+        const localMaxGuests = typeof base.maxGuests === "number" ? base.maxGuests : undefined;
+        base.maxGuests = localMaxGuests ?? (typeof cb.maxGuests === "number" ? cb.maxGuests : undefined);
         base.roomTypeFeatures = Array.isArray(cb.roomTypeFeatures) ? cb.roomTypeFeatures : undefined;
         return base;
       });

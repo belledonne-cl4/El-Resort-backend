@@ -44,6 +44,16 @@ const asStringArray = (value: unknown): string[] | undefined =>
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
+/** Nombre/descripción locales ganan sobre Cloudbeds; un `local` vacío/no seteado cae al valor de Cloudbeds. */
+const preferLocalText = (local: string | undefined, fallback: string | undefined): string | undefined => {
+  const trimmed = (local ?? "").trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+};
+
+/** Huéspedes máximos local gana sobre Cloudbeds; `null`/no seteado cae al valor de Cloudbeds. */
+const preferLocalNumber = (local: number | null | undefined, fallback: number | undefined): number | undefined =>
+  typeof local === "number" && Number.isFinite(local) ? local : fallback;
+
 const normalizeRoomTypeFeatures = (value: unknown): string[] | undefined => {
   const arr = asStringArray(value);
   if (arr) return arr;
@@ -271,6 +281,13 @@ type LocalSpecsNormalized = {
   orden?: number;
   /** Catálogo local ya resuelto (icono + texto). Vacío = la ficha cae a `roomTypeFeatures` de Cloudbeds. */
   beneficios?: BeneficioDTO[];
+  /** Nombre/descripción locales crudos (sin resolver por idioma); `Es` vacío = cae a Cloudbeds. */
+  roomTypeNameLocalEs?: string;
+  roomTypeNameLocalEn?: string | null;
+  roomTypeDescriptionLocalEs?: string;
+  roomTypeDescriptionLocalEn?: string | null;
+  /** Huéspedes máximos local; `null`/no seteado = cae a Cloudbeds. */
+  maxGuestsLocal?: number | null;
 };
 type LocalPricingNormalized = { totalRate?: number; ofertaDelMesRoomRate?: number };
 type ReducedMappingOptions = { applyFallbackDefaults?: boolean; portadaOnly?: boolean; includePortadaMenu?: boolean };
@@ -305,7 +322,7 @@ const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<
   if (uniqueIDs.length === 0) return index;
 
   const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs }, isActive: { $ne: false } })
-    .select({ roomTypeID: 1, bathroomsCount: 1, titleColor: 1, bedrooms: 1, portada: 1, portadaMenu: 1, posicion_fotos_portadas: 1, orden: 1, beneficios: 1 })
+    .select({ roomTypeID: 1, bathroomsCount: 1, titleColor: 1, bedrooms: 1, portada: 1, portadaMenu: 1, posicion_fotos_portadas: 1, orden: 1, beneficios: 1, roomTypeName: 1, roomTypeDescription: 1, maxGuests: 1 })
     .lean();
 
   // Una sola consulta al catálogo para todas las propiedades del listado.
@@ -338,6 +355,8 @@ const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<
     const rawPosicionFotos = (doc as any).posicion_fotos_portadas;
     const posicion_fotos_portadas: Record<string, unknown> | null = rawPosicionFotos && typeof rawPosicionFotos === "object" && !Array.isArray(rawPosicionFotos) ? (rawPosicionFotos as Record<string, unknown>) : null;
     const orden = typeof (doc as any).orden === "number" && Number.isFinite((doc as any).orden) ? (doc as any).orden : undefined;
+    const rawName = (doc as any).roomTypeName as { es?: unknown; en?: unknown } | undefined;
+    const rawDescription = (doc as any).roomTypeDescription as { es?: unknown; en?: unknown } | undefined;
     index.set(doc.roomTypeID, {
       bathroomsCount,
       titleColor: (doc as any).titleColor ?? null,
@@ -347,6 +366,44 @@ const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<
       posicion_fotos_portadas,
       orden,
       beneficios: beneficiosByRoomType.get(doc.roomTypeID) ?? [],
+      roomTypeNameLocalEs: typeof rawName?.es === "string" ? rawName.es : undefined,
+      roomTypeNameLocalEn: typeof rawName?.en === "string" ? rawName.en : null,
+      roomTypeDescriptionLocalEs: typeof rawDescription?.es === "string" ? rawDescription.es : undefined,
+      roomTypeDescriptionLocalEn: typeof rawDescription?.en === "string" ? rawDescription.en : null,
+      maxGuestsLocal: typeof (doc as any).maxGuests === "number" ? (doc as any).maxGuests : null,
+    });
+  }
+
+  return index;
+};
+
+/**
+ * Versión mínima de `fetchRoomTypeLocalSpecsIndex` solo para nombre/descripción/maxGuests, usada por
+ * `listRoomTypesBase` (el único listado que no pasa por `toReducedModel`/`toReducedDetailModel`,
+ * los dos puntos de convergencia donde el resto de los endpoints ya resuelve el override local).
+ */
+const fetchRoomTypeLocalNameDescriptionIndex = async (
+  roomTypeIDs: string[]
+): Promise<Map<string, { roomTypeName?: string; roomTypeDescription?: string; maxGuests?: number }>> => {
+  const index = new Map<string, { roomTypeName?: string; roomTypeDescription?: string; maxGuests?: number }>();
+
+  if (mongoose.connection.readyState !== 1) return index;
+
+  const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((v) => typeof v === "string" && v.trim().length > 0);
+  if (uniqueIDs.length === 0) return index;
+
+  const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs }, isActive: { $ne: false } })
+    .select({ roomTypeID: 1, roomTypeName: 1, roomTypeDescription: 1, maxGuests: 1 })
+    .lean();
+
+  for (const doc of docs) {
+    if (!doc || typeof doc.roomTypeID !== "string") continue;
+    const rawName = (doc as any).roomTypeName as { es?: unknown } | undefined;
+    const rawDescription = (doc as any).roomTypeDescription as { es?: unknown } | undefined;
+    index.set(doc.roomTypeID, {
+      roomTypeName: typeof rawName?.es === "string" ? rawName.es : undefined,
+      roomTypeDescription: typeof rawDescription?.es === "string" ? rawDescription.es : undefined,
+      maxGuests: typeof (doc as any).maxGuests === "number" ? (doc as any).maxGuests : undefined,
     });
   }
 
@@ -428,10 +485,13 @@ export const RoomTypesShowService = {
     const roomTypeIDs = Array.from(new Set(rooms.map((r) => r.roomTypeID)));
 
     const roomTypes = await fetchRoomTypesDetails({ roomTypeIDs, maxGuests: params.maxGuests });
+    const nameDescIndex = await fetchRoomTypeLocalNameDescriptionIndex(roomTypeIDs);
 
     const models: RoomTypeModel[] = [];
     for (const rt of roomTypes) {
       const roomTypeID = asString(rt.roomTypeID);
+      // El filtro de existencia siempre usa el nombre crudo de Cloudbeds: el override local
+      // solo cambia el valor mostrado, nunca si la propiedad aparece o no en los resultados.
       const roomTypeName = asString(rt.roomTypeName);
       if (!roomTypeID || !roomTypeName) continue;
 
@@ -439,15 +499,16 @@ export const RoomTypesShowService = {
       if (inventory.roomIDs.length === 0) continue;
 
       const photos = asStringArray(rt.roomTypePhotos) ?? [];
+      const localEntry = nameDescIndex.get(roomTypeID);
 
       models.push({
         roomTypeID,
         presentation: {
-          roomTypeName,
+          roomTypeName: preferLocalText(localEntry?.roomTypeName, roomTypeName) as string,
           roomTypeNameShort: asString(rt.roomTypeNameShort),
-          roomTypeDescription: asString(rt.roomTypeDescription),
+          roomTypeDescription: preferLocalText(localEntry?.roomTypeDescription, asString(rt.roomTypeDescription)),
           roomTypePhotos: photos,
-          maxGuests: asNumber(rt.maxGuests),
+          maxGuests: preferLocalNumber(localEntry?.maxGuests, asNumber(rt.maxGuests)),
           adultsIncluded: asNumber(rt.adultsIncluded),
           childrenIncluded: asNumber(rt.childrenIncluded),
           roomTypeFeatures: normalizeRoomTypeFeatures(rt.roomTypeFeatures),
@@ -609,8 +670,8 @@ export const RoomTypesShowService = {
 
     const result: Partial<Record<string, unknown>> = {
       roomTypeID: model.roomTypeID,
-      roomTypeName: model.presentation.roomTypeName,
-      maxGuests: model.presentation.maxGuests,
+      roomTypeName: preferLocalText(localSpecs?.roomTypeNameLocalEs, model.presentation.roomTypeName),
+      maxGuests: preferLocalNumber(localSpecs?.maxGuestsLocal, model.presentation.maxGuests),
       pricing: {
         totalRate: localPricing?.totalRate ?? model.pricing.baseRate?.totalRate ?? 0,
         ofertaDelMesRoomRate: localPricing?.ofertaDelMesRoomRate ?? ofertaDelMes?.roomRate ?? 0,
@@ -670,7 +731,7 @@ export const RoomTypesShowService = {
 
     return {
       ...result,
-      roomTypeDescription: model.presentation.roomTypeDescription,
+      roomTypeDescription: preferLocalText(localSpecs?.roomTypeDescriptionLocalEs, model.presentation.roomTypeDescription),
       roomTypeFeatures: model.presentation.roomTypeFeatures,
       beneficios,
       ...(includeSpecs ? { bedrooms: resolvedSpecs.bedrooms } : {}),
