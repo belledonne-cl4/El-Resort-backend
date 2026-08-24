@@ -216,7 +216,7 @@ export class ReviewsController {
         }
       }
 
-      doc.json[REVIEWS_JSON_KEY] = reordered;
+      (doc.json as Record<string, unknown>)[REVIEWS_JSON_KEY] = reordered;
       doc.markModified("json");
       await doc.save();
 

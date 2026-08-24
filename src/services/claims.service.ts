@@ -8,6 +8,7 @@ import { ClaimCodeService } from "./claimCode.service";
 import { ClaimEmailService } from "./claimEmail.service";
 import { BrevoClient } from "../integrations/brevoClient";
 import { getBrevoConfigFromEnv } from "../config/brevo";
+import { toHttpError } from "../utils/errors";
 
 export type CreateClaimInput = {
   fullName: string;
@@ -40,12 +41,6 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   "image/jpeg",
   "image/webp",
 ]);
-
-const toHttpError = (status: number, message: string): Error & { status: number } => {
-  const error = new Error(message) as Error & { status: number };
-  error.status = status;
-  return error;
-};
 
 export const ClaimsService = {
   async createClaim(

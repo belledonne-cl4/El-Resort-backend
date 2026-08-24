@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import User, { IUser } from "../models/User";
+import { getJwtConfigFromEnv } from "../config/jwt";
 
 declare global {
   namespace Express {
@@ -30,13 +31,16 @@ export const authenticate = async (
 
     const token = bearer.split(" ")[1];
 
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET no está definido");
+    let secret: string;
+    try {
+      secret = getJwtConfigFromEnv().secret;
+    } catch (error) {
+      console.error((error as Error).message);
       res.status(500).json({ error: "Error interno del servidor" });
       return;
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET) as JwtPayload;
+    const decoded = jwt.verify(token, secret) as JwtPayload;
 
     if (!decoded || typeof decoded !== "object" || !decoded.id) {
       if (optional) {

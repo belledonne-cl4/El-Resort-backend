@@ -56,7 +56,9 @@ const sanitizeInput = <T extends object>(obj: T): Partial<T> =>
 app.use((req, res, next) => {
   req.body = sanitizeInput(req.body);
   req.query = sanitizeInput(req.query);
-  req.params = sanitizeInput(req.params);
+  // `_.omit` solo quita las claves peligrosas, nunca vacía las que quedan — el `Partial<T>`
+  // que infiere sanitizeInput es más conservador de lo que en verdad devuelve en runtime.
+  req.params = sanitizeInput(req.params) as typeof req.params;
   next();
 });
 

@@ -846,8 +846,10 @@ export class ReservationController {
       const pageNumber = pageNumberRaw ?? 1;
       const pageSize = clamp(pageSizeRaw ?? 20, 1, 20);
 
+      type ReservationQueryParams = NonNullable<Parameters<typeof ReservationService.getReservations>[0]>;
+
       const status = asOptionalString(req.query.status);
-      const allowedStatus: NonNullable<Parameters<typeof ReservationService.getReservations>[0]["status"]>[] = [
+      const allowedStatus: NonNullable<ReservationQueryParams["status"]>[] = [
         "not_confirmed",
         "confirmed",
         "canceled",
@@ -861,7 +863,7 @@ export class ReservationController {
       }
 
       const datesQueryMode = asOptionalString(req.query.datesQueryMode);
-      const allowedDatesQueryMode: NonNullable<Parameters<typeof ReservationService.getReservations>[0]["datesQueryMode"]>[] = [
+      const allowedDatesQueryMode: NonNullable<ReservationQueryParams["datesQueryMode"]>[] = [
         "booking",
         "rooms",
       ];

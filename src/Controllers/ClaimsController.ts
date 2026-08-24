@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { ClaimsService, type CreateClaimInput } from "../services/claims.service";
 import { asOptionalString } from "../utils/http";
+import { getErrorStatus } from "../utils/errors";
 
 /**
  * @openapi
@@ -74,7 +75,7 @@ export class ClaimsController {
 
       res.status(201).json({ success: true, data: result });
     } catch (error) {
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       if (status !== 500) {
         res.status(status).json({ error: (error as Error).message || "Error de validación" });
         return;

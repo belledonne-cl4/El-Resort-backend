@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { LANDING_MEDIA_TIPOS, type LandingMediaTipo } from "../models/LandingMedia";
 import { LandingMediaService } from "../services/landingMedia.service";
 import { GcsStorageService } from "../services/csStorage.service";
+import { getErrorStatus } from "../utils/errors";
 
 type JsonRecord = Record<string, unknown>;
 type JsonLike = null | boolean | number | string | JsonLike[] | JsonRecord;
@@ -641,7 +642,7 @@ export class LandingMediaController {
         return;
       }
 
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       const message = error instanceof Error ? error.message : "Error interno del servidor";
       res.status(status).json({ error: message });
     }
@@ -657,7 +658,7 @@ export class LandingMediaController {
       const data = await LandingMediaService.getConsolidated();
       res.json(data);
     } catch (error) {
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       const message = error instanceof Error ? error.message : "Error interno del servidor";
       res.status(status).json({ error: message });
     }
@@ -681,7 +682,7 @@ export class LandingMediaController {
 
       res.json({ success: true, data });
     } catch (error) {
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       const message = error instanceof Error ? error.message : "Error interno del servidor";
       res.status(status).json({ error: message });
     }
@@ -694,7 +695,7 @@ export class LandingMediaController {
 
       res.json({ success: true, data });
     } catch (error) {
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       const message = error instanceof Error ? error.message : "Error interno del servidor";
       res.status(status).json({ error: message });
     }
@@ -748,7 +749,7 @@ export class LandingMediaController {
 
       res.json({ [doc.nombre]: doc.json });
     } catch (error) {
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       const message = error instanceof Error ? error.message : "Error interno del servidor";
       res.status(status).json({ error: message });
     }
@@ -823,7 +824,7 @@ export class LandingMediaController {
         return;
       }
 
-      const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+      const status = getErrorStatus(error);
       const message = error instanceof Error ? error.message : "Error interno del servidor";
       res.status(status).json({ error: message });
     }

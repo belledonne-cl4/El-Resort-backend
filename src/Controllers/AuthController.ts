@@ -175,7 +175,17 @@ export class AuthController {
         return;
       }
 
+      if (!req.user) {
+        res.status(401).json({ error: "No Autorizado" });
+        return;
+      }
+
       const userFromDB = await User.findById(req.user._id).select("+password");
+      if (!userFromDB) {
+        res.status(404).json({ error: "Usuario no encontrado" });
+        return;
+      }
+
       const isMatch = await checkPassword(current_password, userFromDB.password);
       if (!isMatch) {
         res.status(401).json({ error: "La contraseña actual es incorrecta." });
