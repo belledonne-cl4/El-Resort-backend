@@ -2,8 +2,11 @@ import type { Request, Response } from "express";
 import RoomTypeLocalSpecs from "../../models/RoomTypeLocalSpecs";
 import mongoose from "mongoose";
 import type { AnyBulkWriteOperation } from "mongoose";
-import { isMongoDuplicateKeyError } from "./normalize";
+import { isMongoDuplicateKeyError, slugifyRoomTypeName, buildRoomTypeIdCandidate } from "./normalize";
 import { fetchCloudbedsRoomTypesMapSafe, fetchCloudbedsRatesMapSafe } from "./cloudbedsEnrichment";
+import { RoomTypeLocalTextService } from "../../services/roomTypeLocalText.service";
+
+const MAX_ROOM_TYPE_ID_ATTEMPTS = 30;
 
 export const updateOrderBulk = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -190,24 +193,14 @@ export const duplicate = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { sourceRoomTypeID, newRoomTypeID } = req.body as {
+    const { sourceRoomTypeID, newRoomTypeName } = req.body as {
       sourceRoomTypeID: string;
-      newRoomTypeID: string;
+      newRoomTypeName: string;
     };
 
-    if (!sourceRoomTypeID || !newRoomTypeID) {
-      res.status(400).json({ error: "sourceRoomTypeID y newRoomTypeID son requeridos" });
-      return;
-    }
-
-    if (sourceRoomTypeID === newRoomTypeID) {
-      res.status(400).json({ error: "El nuevo roomTypeID debe ser diferente al original" });
-      return;
-    }
-
-    const existing = await RoomTypeLocalSpecs.findOne({ roomTypeID: newRoomTypeID }).lean();
-    if (existing) {
-      res.status(409).json({ error: "Ya existe un registro con ese roomTypeID" });
+    const newRoomTypeNameEs = typeof newRoomTypeName === "string" ? newRoomTypeName.trim() : "";
+    if (!sourceRoomTypeID || !newRoomTypeNameEs) {
+      res.status(400).json({ error: "sourceRoomTypeID y newRoomTypeName son requeridos" });
       return;
     }
 
@@ -217,17 +210,34 @@ export const duplicate = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { _id, roomTypeID, createdAt, updatedAt, ...rest } = source as any;
-    const duplicateData = {
+    const { _id, roomTypeID, createdAt, updatedAt, roomTypeName, ...rest } = source as any;
+    const newRoomTypeNameResolved = {
+      es: newRoomTypeNameEs,
+      en: await RoomTypeLocalTextService.resolveEnglishText(newRoomTypeNameEs, undefined),
+    };
+    const baseSlug = slugifyRoomTypeName(newRoomTypeNameEs);
+    const buildDuplicateData = (candidateID: string) => ({
       ...rest,
-      roomTypeID: newRoomTypeID,
+      roomTypeID: candidateID,
+      roomTypeName: newRoomTypeNameResolved,
       isActive: true,
       portada: rest.portada ?? null,
       portadaMenu: rest.portadaMenu ?? null,
       portada_video: rest.portada_video ?? null,
-    };
+    });
 
-    const doc = await RoomTypeLocalSpecs.create(duplicateData);
+    let doc;
+    for (let attempt = 0; attempt < MAX_ROOM_TYPE_ID_ATTEMPTS; attempt++) {
+      const candidateID = buildRoomTypeIdCandidate(baseSlug, attempt);
+      try {
+        doc = await RoomTypeLocalSpecs.create(buildDuplicateData(candidateID));
+        break;
+      } catch (createError) {
+        const isLastAttempt = attempt === MAX_ROOM_TYPE_ID_ATTEMPTS - 1;
+        if (!isMongoDuplicateKeyError(createError) || isLastAttempt) throw createError;
+      }
+    }
+
     res.status(201).json({ success: true, data: doc });
   } catch (error) {
     if (isMongoDuplicateKeyError(error)) {

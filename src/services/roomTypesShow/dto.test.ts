@@ -1,7 +1,28 @@
 import { describe, it, expect } from "vitest";
-import { asString, asNumber, asStringArray, asRecord, normalizeRoomTypeFeatures, toReducedModel, toReducedDetailModel } from "./dto";
+import { asString, asNumber, asStringArray, asRecord, normalizeRoomTypeFeatures, toReducedModel, toReducedDetailModel, buildLocalBaseRateFallback } from "./dto";
 import type { RoomTypeModel } from "../../models/RoomType.model";
 import type { LocalSpecsNormalized } from "./types";
+
+describe("buildLocalBaseRateFallback", () => {
+  it("usa el totalRate local cuando existe", () => {
+    const fallback = buildLocalBaseRateFallback("bungalow-parejas", { totalRate: 250 });
+    expect(fallback.roomRate).toBe(250);
+    expect(fallback.totalRate).toBe(250);
+  });
+
+  it("cae a 0 cuando no hay pricing local", () => {
+    const fallback = buildLocalBaseRateFallback("bungalow-parejas");
+    expect(fallback.totalRate).toBe(0);
+  });
+
+  it("marca roomsAvailable: 0 siempre (no reservable in-app)", () => {
+    expect(buildLocalBaseRateFallback("bungalow-parejas", { totalRate: 250 }).roomsAvailable).toBe(0);
+  });
+
+  it("genera un rateID identificable como local", () => {
+    expect(buildLocalBaseRateFallback("bungalow-parejas").rateID).toBe("local:bungalow-parejas");
+  });
+});
 
 describe("scalar coercion helpers", () => {
   it("asString solo pasa strings", () => {
@@ -88,6 +109,16 @@ describe("toReducedModel", () => {
   it("pricing local gana sobre Cloudbeds", () => {
     const result = toReducedModel(baseModel(), undefined, undefined, { totalRate: 500 });
     expect(result.pricing.totalRate).toBe(500);
+  });
+
+  it("maxGuests nunca queda undefined (propiedad sin Cloudbeds ni override local cae a 0)", () => {
+    const modelSinCloudbeds: RoomTypeModel = {
+      ...baseModel(),
+      presentation: { ...baseModel().presentation, maxGuests: undefined },
+    };
+    const result = toReducedModel(modelSinCloudbeds);
+    expect(result.maxGuests).toBe(0);
+    expect(result.maxGuests).not.toBeUndefined();
   });
 });
 

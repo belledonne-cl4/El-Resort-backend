@@ -25,15 +25,23 @@ export const buildDefaultLocalSpecs = (): LocalSpecsNormalized => ({
   bedrooms: [{ number: 1, photos: [] }],
 });
 
-export const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promise<Map<string, LocalSpecsNormalized>> => {
+/**
+ * @param roomTypeIDs Si se omite, trae TODAS las propiedades activas (usado como fuente primaria
+ * del catálogo público, ya sin depender de que Cloudbeds tenga un roomTypeID equivalente).
+ */
+export const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs?: string[]): Promise<Map<string, LocalSpecsNormalized>> => {
   const index = new Map<string, LocalSpecsNormalized>();
 
   if (mongoose.connection.readyState !== 1) return index;
 
-  const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((v) => typeof v === "string" && v.trim().length > 0);
-  if (uniqueIDs.length === 0) return index;
+  const filter: Record<string, unknown> = { isActive: { $ne: false } };
+  if (roomTypeIDs !== undefined) {
+    const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((v) => typeof v === "string" && v.trim().length > 0);
+    if (uniqueIDs.length === 0) return index;
+    filter.roomTypeID = { $in: uniqueIDs };
+  }
 
-  const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs }, isActive: { $ne: false } })
+  const docs = await RoomTypeLocalSpecs.find(filter)
     .select({ roomTypeID: 1, bathroomsCount: 1, titleColor: 1, bedrooms: 1, portada: 1, portadaMenu: 1, posicion_fotos_portadas: 1, orden: 1, beneficios: 1, roomTypeName: 1, roomTypeDescription: 1, maxGuests: 1 })
     .lean();
 
@@ -91,20 +99,27 @@ export const fetchRoomTypeLocalSpecsIndex = async (roomTypeIDs: string[]): Promi
 
 /**
  * Versión mínima de `fetchRoomTypeLocalSpecsIndex` solo para nombre/descripción/maxGuests, usada por
- * `listRoomTypesBase` (el único listado que no pasa por `toReducedModel`/`toReducedDetailModel`,
- * los dos puntos de convergencia donde el resto de los endpoints ya resuelve el override local).
+ * `listRoomTypesBase`/`getRoomTypeWithPricing` (los listados que no pasan por `toReducedModel`/
+ * `toReducedDetailModel`, los dos puntos de convergencia donde el resto de los endpoints ya resuelve
+ * el override local).
+ *
+ * @param roomTypeIDs Si se omite, trae TODAS las propiedades activas (base del catálogo público).
  */
 export const fetchRoomTypeLocalNameDescriptionIndex = async (
-  roomTypeIDs: string[]
+  roomTypeIDs?: string[]
 ): Promise<Map<string, { roomTypeName?: string; roomTypeDescription?: string; maxGuests?: number }>> => {
   const index = new Map<string, { roomTypeName?: string; roomTypeDescription?: string; maxGuests?: number }>();
 
   if (mongoose.connection.readyState !== 1) return index;
 
-  const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((v) => typeof v === "string" && v.trim().length > 0);
-  if (uniqueIDs.length === 0) return index;
+  const filter: Record<string, unknown> = { isActive: { $ne: false } };
+  if (roomTypeIDs !== undefined) {
+    const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((v) => typeof v === "string" && v.trim().length > 0);
+    if (uniqueIDs.length === 0) return index;
+    filter.roomTypeID = { $in: uniqueIDs };
+  }
 
-  const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs }, isActive: { $ne: false } })
+  const docs = await RoomTypeLocalSpecs.find(filter)
     .select({ roomTypeID: 1, roomTypeName: 1, roomTypeDescription: 1, maxGuests: 1 })
     .lean();
 

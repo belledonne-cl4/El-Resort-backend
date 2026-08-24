@@ -270,3 +270,20 @@ export const assertVideoFiles = (files: Express.Multer.File[], fieldName: string
     }
   }
 };
+
+/** Slug en minúsculas sin acentos, solo [a-z0-9-], para usar como roomTypeID autogenerado. */
+export const slugifyRoomTypeName = (name: string): string => {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return base.length > 0 ? base : "propiedad";
+};
+
+/** roomTypeID candidato con un sufijo numérico incremental, para reintentar en caso de colisión. */
+export const buildRoomTypeIdCandidate = (baseSlug: string, attempt: number): string =>
+  attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;

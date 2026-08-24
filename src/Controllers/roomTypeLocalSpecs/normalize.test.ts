@@ -13,6 +13,8 @@ import {
   normalizePricing,
   assertImageFiles,
   assertVideoFiles,
+  slugifyRoomTypeName,
+  buildRoomTypeIdCandidate,
 } from "./normalize";
 
 const file = (fieldname: string, mimetype: string): Express.Multer.File =>
@@ -197,5 +199,34 @@ describe("assertImageFiles / assertVideoFiles", () => {
   it("lanza para mimetypes incorrectos", () => {
     expect(() => assertImageFiles([file("f", "video/mp4")], "campo")).toThrow();
     expect(() => assertVideoFiles([file("f", "image/png")], "campo")).toThrow();
+  });
+});
+
+describe("slugifyRoomTypeName", () => {
+  it("convierte a minúsculas y reemplaza espacios por guiones", () => {
+    expect(slugifyRoomTypeName("Bungalow Parejas")).toBe("bungalow-parejas");
+  });
+
+  it("quita acentos", () => {
+    expect(slugifyRoomTypeName("Cabaña Río")).toBe("cabana-rio");
+  });
+
+  it("colapsa símbolos y recorta guiones al inicio/final", () => {
+    expect(slugifyRoomTypeName("  ¡Casa #3!  ")).toBe("casa-3");
+  });
+
+  it("devuelve un slug de respaldo si el nombre no deja caracteres válidos", () => {
+    expect(slugifyRoomTypeName("!!!")).toBe("propiedad");
+  });
+});
+
+describe("buildRoomTypeIdCandidate", () => {
+  it("el primer intento devuelve el slug base sin sufijo", () => {
+    expect(buildRoomTypeIdCandidate("bungalow-parejas", 0)).toBe("bungalow-parejas");
+  });
+
+  it("los reintentos agregan un sufijo numérico incremental", () => {
+    expect(buildRoomTypeIdCandidate("bungalow-parejas", 1)).toBe("bungalow-parejas-2");
+    expect(buildRoomTypeIdCandidate("bungalow-parejas", 2)).toBe("bungalow-parejas-3");
   });
 });

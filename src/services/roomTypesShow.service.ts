@@ -1,7 +1,7 @@
 import { type RoomTypeModel } from "../models/RoomType.model";
 import type { RoomTypeReducedDetailModel, RoomTypeReducedModel } from "../models/RoomTypeReduced.model";
 import { preferLocalText, preferLocalNumber } from "../utils/localOverride";
-import { asString, asNumber, asStringArray, asRecord, normalizeRoomTypeFeatures, toReducedModel, toReducedDetailModel } from "./roomTypesShow/dto";
+import { asString, asNumber, asStringArray, asRecord, normalizeRoomTypeFeatures, toReducedModel, toReducedDetailModel, buildLocalBaseRateFallback } from "./roomTypesShow/dto";
 import { buildInventoryIndex, fetchAllRoomsForDates, fetchRoomTypesDetails, fetchRatePlansIndex } from "./roomTypesShow/cloudbedsFetch";
 import {
   fetchRoomTypeLocalSpecsIndex,
@@ -11,57 +11,67 @@ import {
 } from "./roomTypesShow/localSpecsIndex";
 import { EXTENDED_STAY_MIN_NIGHTS, getNightsBetween, isExtendedStayRatePlan } from "./roomTypesShow/dateAndFilters";
 
+/** Construye el `inventory`/`linkedRoomTypeQty` de un RoomTypeModel a partir de un item crudo de Cloudbeds (o vacío si no hay match). */
+const buildLinkedRoomTypeQty = (rt: Record<string, unknown> | undefined) =>
+  rt && Array.isArray(rt.linkedRoomTypeQty)
+    ? rt.linkedRoomTypeQty
+        .map((v) => asRecord(v))
+        .filter((v): v is Record<string, unknown> => !!v)
+        .map((v) => ({
+          roomTypeID: asString(v.roomTypeID) ?? "",
+          roomQty: asNumber(v.roomQty) ?? 0,
+        }))
+        .filter((v) => v.roomTypeID.length > 0 && v.roomQty > 0)
+    : undefined;
+
 export const RoomTypesShowService = {
+  /**
+   * Fuente primaria: las propiedades administradas localmente (`RoomTypeLocalSpecs`), no el
+   * catálogo de Cloudbeds — una propiedad sin equivalente en Cloudbeds igual aparece aquí.
+   * Cloudbeds se usa solo como enriquecimiento oportunista (fotos/inventario/features) cuando
+   * el `roomTypeID` coincide con uno real.
+   */
   async listRoomTypesBase(params: { startDate: string; endDate: string; maxGuests?: number }): Promise<RoomTypeModel[]> {
+    const nameDescIndex = await fetchRoomTypeLocalNameDescriptionIndex();
+    const localRoomTypeIDs = Array.from(nameDescIndex.keys());
+    if (localRoomTypeIDs.length === 0) return [];
+
     const rooms = await fetchAllRoomsForDates({ startDate: params.startDate, endDate: params.endDate });
     const inventoryByRoomType = buildInventoryIndex(rooms);
-    const roomTypeIDs = Array.from(new Set(rooms.map((r) => r.roomTypeID)));
 
-    const roomTypes = await fetchRoomTypesDetails({ roomTypeIDs, maxGuests: params.maxGuests });
-    const nameDescIndex = await fetchRoomTypeLocalNameDescriptionIndex(roomTypeIDs);
+    const roomTypes = await fetchRoomTypesDetails({ roomTypeIDs: localRoomTypeIDs, maxGuests: params.maxGuests });
+    const cloudbedsByID = new Map<string, Record<string, unknown>>();
+    for (const rt of roomTypes) {
+      const id = asString(rt.roomTypeID);
+      if (id) cloudbedsByID.set(id, rt);
+    }
 
     const models: RoomTypeModel[] = [];
-    for (const rt of roomTypes) {
-      const roomTypeID = asString(rt.roomTypeID);
-      // El filtro de existencia siempre usa el nombre crudo de Cloudbeds: el override local
-      // solo cambia el valor mostrado, nunca si la propiedad aparece o no en los resultados.
-      const roomTypeName = asString(rt.roomTypeName);
-      if (!roomTypeID || !roomTypeName) continue;
-
+    for (const roomTypeID of localRoomTypeIDs) {
+      const rt = cloudbedsByID.get(roomTypeID);
       const inventory = inventoryByRoomType.get(roomTypeID) ?? { roomIDs: [], roomNames: [] };
-      if (inventory.roomIDs.length === 0) continue;
-
-      const photos = asStringArray(rt.roomTypePhotos) ?? [];
       const localEntry = nameDescIndex.get(roomTypeID);
 
       models.push({
         roomTypeID,
         presentation: {
-          roomTypeName: preferLocalText(localEntry?.roomTypeName, roomTypeName) as string,
-          roomTypeNameShort: asString(rt.roomTypeNameShort),
-          roomTypeDescription: preferLocalText(localEntry?.roomTypeDescription, asString(rt.roomTypeDescription)),
-          roomTypePhotos: photos,
-          maxGuests: preferLocalNumber(localEntry?.maxGuests, asNumber(rt.maxGuests)),
-          adultsIncluded: asNumber(rt.adultsIncluded),
-          childrenIncluded: asNumber(rt.childrenIncluded),
-          roomTypeFeatures: normalizeRoomTypeFeatures(rt.roomTypeFeatures),
+          roomTypeName: preferLocalText(localEntry?.roomTypeName, rt ? asString(rt.roomTypeName) : undefined) ?? "",
+          roomTypeNameShort: rt ? asString(rt.roomTypeNameShort) : undefined,
+          roomTypeDescription: preferLocalText(localEntry?.roomTypeDescription, rt ? asString(rt.roomTypeDescription) : undefined),
+          roomTypePhotos: rt ? asStringArray(rt.roomTypePhotos) ?? [] : [],
+          // El schema del frontend exige maxGuests siempre presente como number; 0 = "sin dato" (nunca undefined).
+          maxGuests: preferLocalNumber(localEntry?.maxGuests, rt ? asNumber(rt.maxGuests) : undefined) ?? 0,
+          adultsIncluded: rt ? asNumber(rt.adultsIncluded) : undefined,
+          childrenIncluded: rt ? asNumber(rt.childrenIncluded) : undefined,
+          roomTypeFeatures: rt ? normalizeRoomTypeFeatures(rt.roomTypeFeatures) : undefined,
         },
         inventory: {
           roomIDs: inventory.roomIDs,
           roomNames: inventory.roomNames,
-          totalUnits: asNumber(rt.roomTypeUnits),
-          linkedRoomIDs: asStringArray(rt.linkedRoomIDs),
-          linkedRoomTypeIDs: asStringArray(rt.linkedRoomTypeIDs),
-          linkedRoomTypeQty: Array.isArray(rt.linkedRoomTypeQty)
-            ? rt.linkedRoomTypeQty
-                .map((v) => asRecord(v))
-                .filter((v): v is Record<string, unknown> => !!v)
-                .map((v) => ({
-                  roomTypeID: asString(v.roomTypeID) ?? "",
-                  roomQty: asNumber(v.roomQty) ?? 0,
-                }))
-                .filter((v) => v.roomTypeID.length > 0 && v.roomQty > 0)
-            : undefined,
+          totalUnits: rt ? asNumber(rt.roomTypeUnits) : undefined,
+          linkedRoomIDs: rt ? asStringArray(rt.linkedRoomIDs) : undefined,
+          linkedRoomTypeIDs: rt ? asStringArray(rt.linkedRoomTypeIDs) : undefined,
+          linkedRoomTypeQty: buildLinkedRoomTypeQty(rt),
         },
         pricing: {
           ratePlans: [],
@@ -88,6 +98,7 @@ export const RoomTypesShowService = {
         endDate: params.endDate,
       promoCode: params.promoCode,
     });
+      const localPricingIndex = await fetchRoomTypeLocalPricingIndex(roomTypeIDs);
 
       return baseModels.map((m) => {
         const pricing = pricingIndex.get(m.roomTypeID);
@@ -97,7 +108,7 @@ export const RoomTypesShowService = {
         return {
           ...m,
           pricing: {
-            baseRate: pricing?.baseRate,
+            baseRate: pricing?.baseRate ?? buildLocalBaseRateFallback(m.roomTypeID, localPricingIndex.get(m.roomTypeID)),
             ratePlans,
           },
         };
@@ -310,55 +321,54 @@ export const RoomTypesShowService = {
     });
   },
 
+  /**
+   * Fuente primaria: las propiedades administradas localmente. Cloudbeds es enriquecimiento
+   * oportunista por `roomTypeID` coincidente, nunca un requisito de existencia.
+   */
   async listRoomTypesReducedCatalogWithLocalPricing(params: {
     maxGuests?: number;
   }): Promise<RoomTypeReducedModel[]> {
-    const roomTypes = await fetchRoomTypesDetails({ maxGuests: params.maxGuests });
+    const specsIndex = await fetchRoomTypeLocalSpecsIndex();
+    const localRoomTypeIDs = Array.from(specsIndex.keys());
+    if (localRoomTypeIDs.length === 0) return [];
 
-    const full: RoomTypeModel[] = [];
+    const roomTypes = await fetchRoomTypesDetails({ roomTypeIDs: localRoomTypeIDs, maxGuests: params.maxGuests });
+    const cloudbedsByID = new Map<string, Record<string, unknown>>();
     for (const rt of roomTypes) {
-      const roomTypeID = asString(rt.roomTypeID);
-      const roomTypeName = asString(rt.roomTypeName);
-      if (!roomTypeID || !roomTypeName) continue;
+      const id = asString(rt.roomTypeID);
+      if (id) cloudbedsByID.set(id, rt);
+    }
 
-      full.push({
+    const full: RoomTypeModel[] = localRoomTypeIDs.map((roomTypeID) => {
+      const rt = cloudbedsByID.get(roomTypeID);
+      return {
         roomTypeID,
         presentation: {
-          roomTypeName,
-          roomTypeNameShort: asString(rt.roomTypeNameShort),
-          roomTypeDescription: asString(rt.roomTypeDescription),
-          roomTypePhotos: asStringArray(rt.roomTypePhotos) ?? [],
-          maxGuests: asNumber(rt.maxGuests),
-          adultsIncluded: asNumber(rt.adultsIncluded),
-          childrenIncluded: asNumber(rt.childrenIncluded),
-          roomTypeFeatures: normalizeRoomTypeFeatures(rt.roomTypeFeatures),
+          roomTypeName: rt ? asString(rt.roomTypeName) ?? "" : "",
+          roomTypeNameShort: rt ? asString(rt.roomTypeNameShort) : undefined,
+          roomTypeDescription: rt ? asString(rt.roomTypeDescription) : undefined,
+          roomTypePhotos: rt ? asStringArray(rt.roomTypePhotos) ?? [] : [],
+          maxGuests: rt ? asNumber(rt.maxGuests) : undefined,
+          adultsIncluded: rt ? asNumber(rt.adultsIncluded) : undefined,
+          childrenIncluded: rt ? asNumber(rt.childrenIncluded) : undefined,
+          roomTypeFeatures: rt ? normalizeRoomTypeFeatures(rt.roomTypeFeatures) : undefined,
         },
         inventory: {
           roomIDs: [],
           roomNames: [],
-          totalUnits: asNumber(rt.roomTypeUnits),
-          linkedRoomIDs: asStringArray(rt.linkedRoomIDs),
-          linkedRoomTypeIDs: asStringArray(rt.linkedRoomTypeIDs),
-          linkedRoomTypeQty: Array.isArray(rt.linkedRoomTypeQty)
-            ? rt.linkedRoomTypeQty
-                .map((v) => asRecord(v))
-                .filter((v): v is Record<string, unknown> => !!v)
-                .map((v) => ({
-                  roomTypeID: asString(v.roomTypeID) ?? "",
-                  roomQty: asNumber(v.roomQty) ?? 0,
-                }))
-                .filter((v) => v.roomTypeID.length > 0 && v.roomQty > 0)
-            : undefined,
+          totalUnits: rt ? asNumber(rt.roomTypeUnits) : undefined,
+          linkedRoomIDs: rt ? asStringArray(rt.linkedRoomIDs) : undefined,
+          linkedRoomTypeIDs: rt ? asStringArray(rt.linkedRoomTypeIDs) : undefined,
+          linkedRoomTypeQty: buildLinkedRoomTypeQty(rt),
         },
         pricing: {
           ratePlans: [],
         },
-      });
-    }
+      };
+    });
 
-    const specsIndex = await fetchRoomTypeLocalSpecsIndex(full.map((m) => m.roomTypeID));
-    const pricingIndex = await fetchRoomTypeLocalPricingIndex(full.map((m) => m.roomTypeID));
-    await enrichPricingIndexWithCloudBeds(full.map((m) => m.roomTypeID), pricingIndex);
+    const pricingIndex = await fetchRoomTypeLocalPricingIndex(localRoomTypeIDs);
+    await enrichPricingIndexWithCloudBeds(localRoomTypeIDs, pricingIndex);
 
     // Ordenar por `orden` ascendente; los que no tengan `orden` quedan al final
     full.sort((a, b) => {
@@ -377,54 +387,43 @@ export const RoomTypesShowService = {
     roomTypeID: string;
     maxGuests?: number;
   }): Promise<RoomTypeReducedDetailModel | null> {
+    const specsIndex = await fetchRoomTypeLocalSpecsIndex([params.roomTypeID]);
+    const localSpecs = specsIndex.get(params.roomTypeID);
+    if (!localSpecs) return null;
+
     const details = await fetchRoomTypesDetails({ roomTypeIDs: [params.roomTypeID], maxGuests: params.maxGuests });
     const rt = details[0];
-    if (!rt) return null;
-
-    const roomTypeID = asString(rt.roomTypeID);
-    const roomTypeName = asString(rt.roomTypeName);
-    if (!roomTypeID || !roomTypeName) return null;
 
     const model: RoomTypeModel = {
-      roomTypeID,
+      roomTypeID: params.roomTypeID,
       presentation: {
-        roomTypeName,
-        roomTypeNameShort: asString(rt.roomTypeNameShort),
-        roomTypeDescription: asString(rt.roomTypeDescription),
-        roomTypePhotos: asStringArray(rt.roomTypePhotos) ?? [],
-        maxGuests: asNumber(rt.maxGuests),
-        adultsIncluded: asNumber(rt.adultsIncluded),
-        childrenIncluded: asNumber(rt.childrenIncluded),
-        roomTypeFeatures: normalizeRoomTypeFeatures(rt.roomTypeFeatures),
+        roomTypeName: rt ? asString(rt.roomTypeName) ?? "" : "",
+        roomTypeNameShort: rt ? asString(rt.roomTypeNameShort) : undefined,
+        roomTypeDescription: rt ? asString(rt.roomTypeDescription) : undefined,
+        roomTypePhotos: rt ? asStringArray(rt.roomTypePhotos) ?? [] : [],
+        maxGuests: rt ? asNumber(rt.maxGuests) : undefined,
+        adultsIncluded: rt ? asNumber(rt.adultsIncluded) : undefined,
+        childrenIncluded: rt ? asNumber(rt.childrenIncluded) : undefined,
+        roomTypeFeatures: rt ? normalizeRoomTypeFeatures(rt.roomTypeFeatures) : undefined,
       },
       inventory: {
         roomIDs: [],
         roomNames: [],
-        totalUnits: asNumber(rt.roomTypeUnits),
-        linkedRoomIDs: asStringArray(rt.linkedRoomIDs),
-        linkedRoomTypeIDs: asStringArray(rt.linkedRoomTypeIDs),
-        linkedRoomTypeQty: Array.isArray(rt.linkedRoomTypeQty)
-          ? rt.linkedRoomTypeQty
-              .map((v) => asRecord(v))
-              .filter((v): v is Record<string, unknown> => !!v)
-              .map((v) => ({
-                roomTypeID: asString(v.roomTypeID) ?? "",
-                roomQty: asNumber(v.roomQty) ?? 0,
-              }))
-              .filter((v) => v.roomTypeID.length > 0 && v.roomQty > 0)
-          : undefined,
+        totalUnits: rt ? asNumber(rt.roomTypeUnits) : undefined,
+        linkedRoomIDs: rt ? asStringArray(rt.linkedRoomIDs) : undefined,
+        linkedRoomTypeIDs: rt ? asStringArray(rt.linkedRoomTypeIDs) : undefined,
+        linkedRoomTypeQty: buildLinkedRoomTypeQty(rt),
       },
       pricing: {
         ratePlans: [],
       },
     };
 
-    const specsIndex = await fetchRoomTypeLocalSpecsIndex([params.roomTypeID]);
     const pricingIndex = await fetchRoomTypeLocalPricingIndex([params.roomTypeID]);
     await enrichPricingIndexWithCloudBeds([params.roomTypeID], pricingIndex);
     return toReducedDetailModel(
       model,
-      specsIndex.get(params.roomTypeID),
+      localSpecs,
       { applyFallbackDefaults: false, portadaOnly: true, includePortadaMenu: true },
       pricingIndex.get(params.roomTypeID)
     );

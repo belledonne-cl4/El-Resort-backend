@@ -4,6 +4,23 @@ import { preferLocalText, preferLocalNumber } from "../../utils/localOverride";
 import type { LocalSpecsNormalized, LocalPricingNormalized, ReducedMappingOptions } from "./types";
 import { buildDefaultLocalSpecs } from "./localSpecsIndex";
 
+/**
+ * Cuando una propiedad no tiene tarifa real de Cloudbeds (porque nunca existió ahí, o no hay
+ * disponibilidad para las fechas pedidas), el schema del frontend (`pricing.baseRate`) exige un
+ * objeto — no puede omitirse sin romper el parseo de toda la respuesta de `/api/rooms/show`.
+ * `roomsAvailable: 0` marca a propósito "no reservable in-app": reservar sigue siendo 100% Cloudbeds.
+ */
+export const buildLocalBaseRateFallback = (
+  roomTypeID: string,
+  localPricing?: LocalPricingNormalized
+): NonNullable<RoomTypeModel["pricing"]["baseRate"]> => ({
+  rateID: `local:${roomTypeID}`,
+  roomRate: localPricing?.totalRate ?? 0,
+  totalRate: localPricing?.totalRate ?? 0,
+  roomsAvailable: 0,
+  isDerived: false,
+});
+
 export const asString = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 export const asNumber = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 export const asStringArray = (value: unknown): string[] | undefined =>
@@ -45,7 +62,8 @@ export const toReducedModel = (
   const result: Partial<Record<string, unknown>> = {
     roomTypeID: model.roomTypeID,
     roomTypeName: preferLocalText(localSpecs?.roomTypeNameLocalEs, model.presentation.roomTypeName),
-    maxGuests: preferLocalNumber(localSpecs?.maxGuestsLocal, model.presentation.maxGuests),
+    // El schema del frontend exige maxGuests siempre presente como number; 0 = "sin dato" (nunca undefined).
+    maxGuests: preferLocalNumber(localSpecs?.maxGuestsLocal, model.presentation.maxGuests) ?? 0,
     pricing: {
       totalRate: localPricing?.totalRate ?? model.pricing.baseRate?.totalRate ?? 0,
       ofertaDelMesRoomRate: localPricing?.ofertaDelMesRoomRate ?? ofertaDelMes?.roomRate ?? 0,

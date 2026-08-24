@@ -11,6 +11,16 @@ import { hasRole } from "../middleware/hasRole";
 const router = Router();
 const upload = createMemoryUpload(30);
 
+// Reordenar en cascada (array de { id, orden })
+router.put(
+  "/orden",
+  body().isArray({ min: 1 }).withMessage("El body debe ser un array de { id, orden }"),
+  handleInputErrors,
+  authenticate,
+  hasRole(["marketing"]),
+  AreaController.updateOrderBulk
+);
+
 // Obtener todas las áreas
 router.get(
   "/",
@@ -49,6 +59,15 @@ router.patch(
   authenticate,
   hasRole(["marketing"]),
   AreaController.patchAreaById
+);
+
+router.delete(
+  "/:id",
+  param("id").isMongoId().withMessage("El id no es valido"),
+  handleInputErrors,
+  authenticate,
+  hasRole(["marketing"]),
+  AreaController.deleteArea
 );
 
 router.delete(

@@ -21,9 +21,13 @@ import {
   normalizePricing,
   assertImageFiles,
   assertVideoFiles,
+  slugifyRoomTypeName,
+  buildRoomTypeIdCandidate,
 } from "./normalize";
 import { uploadImageFile, uploadVideoFile, rollbackUploads, type UploadTracker } from "./mediaUpload";
 import { fetchCloudbedsRoomTypesMapSafe, fetchCloudbedsRatesMapSafe } from "./cloudbedsEnrichment";
+
+const MAX_ROOM_TYPE_ID_ATTEMPTS = 30;
 
 export const create = async (req: Request, res: Response): Promise<void> => {
   const tracker: UploadTracker = { uploadedFileIds: [] };
@@ -33,8 +37,9 @@ export const create = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { roomTypeID, bedrooms, bathroomsCount, titleColor, condominioID, video_url, extraGalleryImages, portada_video, portada, portadaMenu, pricing, posicion_fotos_portadas } = req.body as {
-      roomTypeID: string;
+    const { roomTypeName, roomTypeDescription, bedrooms, bathroomsCount, titleColor, condominioID, video_url, extraGalleryImages, portada_video, portada, portadaMenu, pricing, posicion_fotos_portadas } = req.body as {
+      roomTypeName: string;
+      roomTypeDescription?: string;
       bathroomsCount: number;
       titleColor?: string | null;
       bedrooms: Array<{ number: number; description?: string; photos?: string[] }>;
@@ -50,6 +55,12 @@ export const create = async (req: Request, res: Response): Promise<void> => {
       };
       posicion_fotos_portadas?: Record<string, unknown> | null;
     };
+
+    const roomTypeNameEs = typeof roomTypeName === "string" ? roomTypeName.trim() : "";
+    if (!roomTypeNameEs) {
+      throw toHttpError(400, "roomTypeName es requerido");
+    }
+    const roomTypeDescriptionEs = typeof roomTypeDescription === "string" ? roomTypeDescription.trim() : "";
 
     const normalizedVideoUrls = normalizeStringArray(video_url, "video_url") ?? [];
     const normalizedExtraGalleryImages = normalizeStringArray(extraGalleryImages, "extraGalleryImages") ?? [];
@@ -104,7 +115,19 @@ export const create = async (req: Request, res: Response): Promise<void> => {
       portadaMenu_value = await uploadImageFile(portadaMenuImageFiles[0], tracker);
     }
 
-    const doc = await RoomTypeLocalSpecs.create({
+    const roomTypeNameResolved = {
+      es: roomTypeNameEs,
+      en: await RoomTypeLocalTextService.resolveEnglishText(roomTypeNameEs, undefined),
+    };
+    const roomTypeDescriptionResolved = roomTypeDescriptionEs
+      ? {
+          es: roomTypeDescriptionEs,
+          en: await RoomTypeLocalTextService.resolveEnglishText(roomTypeDescriptionEs, undefined),
+        }
+      : undefined;
+
+    const baseSlug = slugifyRoomTypeName(roomTypeNameEs);
+    const buildDoc = (roomTypeID: string) => ({
       roomTypeID,
       bathroomsCount,
       titleColor: typeof titleColor === "string" ? titleColor : null,
@@ -123,7 +146,22 @@ export const create = async (req: Request, res: Response): Promise<void> => {
       extraGalleryImages: normalizedExtraGalleryImages,
       pricing: normalizedPricing,
       posicion_fotos_portadas: normalizedPosicionFotos,
+      roomTypeName: roomTypeNameResolved,
+      roomTypeDescription: roomTypeDescriptionResolved,
     });
+
+    let doc;
+    for (let attempt = 0; attempt < MAX_ROOM_TYPE_ID_ATTEMPTS; attempt++) {
+      const candidateID = buildRoomTypeIdCandidate(baseSlug, attempt);
+      try {
+        doc = await RoomTypeLocalSpecs.create(buildDoc(candidateID));
+        break;
+      } catch (createError) {
+        const isLastAttempt = attempt === MAX_ROOM_TYPE_ID_ATTEMPTS - 1;
+        if (!isMongoDuplicateKeyError(createError) || isLastAttempt) throw createError;
+      }
+    }
+
     res.status(201).json({ success: true, data: doc });
   } catch (error) {
     if (tracker.uploadedFileIds.length > 0) {
