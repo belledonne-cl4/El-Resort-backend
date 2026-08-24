@@ -290,6 +290,15 @@ const isFolderEntry = (item: {
   return !hasMimetype;
 };
 
+type SupabaseFileEntry = {
+  name: string;
+  id?: string | null;
+  metadata?: unknown;
+  created_at?: string | null;
+  updated_at?: string | null;
+  last_accessed_at?: string | null;
+};
+
 const listAllFilesFromPrefix = async ({
   client,
   bucket,
@@ -298,9 +307,9 @@ const listAllFilesFromPrefix = async ({
   client: ReturnType<typeof getCachedSupabaseClientFromEnv>["client"];
   bucket: string;
   prefix: string;
-}): Promise<Array<{ path: string; item: { name: string; id?: string | null; metadata?: unknown; created_at?: string; updated_at?: string; last_accessed_at?: string } }>> => {
+}): Promise<Array<{ path: string; item: SupabaseFileEntry }>> => {
   const queue: string[] = [prefix];
-  const files: Array<{ path: string; item: { name: string; id?: string | null; metadata?: unknown; created_at?: string; updated_at?: string; last_accessed_at?: string } }> = [];
+  const files: Array<{ path: string; item: SupabaseFileEntry }> = [];
 
   while (queue.length > 0) {
     const currentPrefix = queue.shift() ?? "";
@@ -395,9 +404,9 @@ export const SupabaseStorageService = {
           path: fullPath,
           url,
           id: item.id,
-          createdAt: item.created_at,
-          updatedAt: item.updated_at,
-          lastAccessedAt: item.last_accessed_at,
+          createdAt: item.created_at ?? undefined,
+          updatedAt: item.updated_at ?? undefined,
+          lastAccessedAt: item.last_accessed_at ?? undefined,
           contentType: metadataMimetype,
           size: metadataSize,
         } satisfies StorageFileWithUrl;

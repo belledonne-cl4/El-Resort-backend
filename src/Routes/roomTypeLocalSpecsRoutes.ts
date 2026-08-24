@@ -61,7 +61,7 @@ router.patch(
 router.post(
   "/duplicate",
   body("sourceRoomTypeID").isString().notEmpty().withMessage("sourceRoomTypeID es requerido"),
-  body("newRoomTypeID").isString().notEmpty().withMessage("newRoomTypeID es requerido"),
+  body("newRoomTypeName").isString().trim().notEmpty().withMessage("newRoomTypeName es requerido"),
   handleInputErrors,
   authenticate,
   hasRole(["marketing"]),
@@ -70,7 +70,8 @@ router.post(
 
 router.post(
   "/",
-  body("roomTypeID").isString().notEmpty().withMessage("roomTypeID es requerido"),
+  body("roomTypeName").isString().trim().notEmpty().withMessage("roomTypeName es requerido"),
+  body("roomTypeDescription").optional().isString().withMessage("roomTypeDescription debe ser string"),
   body("bathroomsCount").isInt({ min: 0 }).withMessage("bathroomsCount debe ser un entero >= 0"),
   body("condominioID").optional().isMongoId().withMessage("condominioID debe ser un ObjectId valido"),
   body("bedrooms").isArray().withMessage("bedrooms debe ser un array"),

@@ -4,7 +4,35 @@ import { RoomTypesShowService } from "../services/roomTypesShow.service";
 import { asOptionalBoolean, asOptionalInt, asOptionalString, formatCloudbedsError } from "../utils/http";
 import { getDefaultStayDates, isIsoDateYmd } from "../utils/dates";
 import { parseIdiomaQuery } from "../utils/idioma";
-import { RoomTypeTranslationService } from "../services/roomTypeTranslation.service";
+import { RoomTypeTranslationService, type LocalEnByRoomTypeID } from "../services/roomTypeTranslation.service";
+import RoomTypeLocalSpecs from "../models/RoomTypeLocalSpecs";
+import mongoose from "mongoose";
+
+/** Inglés local ya persistido para las propiedades pedidas; usado por el pipeline de traducción
+ * para no re-traducir en vivo lo que el admin ya guardó (o para no re-traducir texto que ya está
+ * en inglés). Sin conexión a Mongo o sin roomTypeIDs, devuelve un Map vacío (cae al comportamiento
+ * de siempre: traducir en vivo). */
+const fetchLocalEnByRoomTypeID = async (roomTypeIDs: string[]): Promise<LocalEnByRoomTypeID> => {
+  const result: LocalEnByRoomTypeID = new Map();
+  if (mongoose.connection.readyState !== 1) return result;
+
+  const uniqueIDs = Array.from(new Set(roomTypeIDs)).filter((id) => id.trim().length > 0);
+  if (uniqueIDs.length === 0) return result;
+
+  const docs = await RoomTypeLocalSpecs.find({ roomTypeID: { $in: uniqueIDs } })
+    .select({ roomTypeID: 1, "roomTypeName.en": 1, "roomTypeDescription.en": 1 })
+    .lean();
+
+  for (const doc of docs) {
+    if (!doc || typeof doc.roomTypeID !== "string") continue;
+    result.set(doc.roomTypeID, {
+      nameEn: doc.roomTypeName?.en ?? null,
+      descriptionEn: doc.roomTypeDescription?.en ?? null,
+    });
+  }
+
+  return result;
+};
 
 /**
  * @openapi
@@ -374,7 +402,8 @@ export class RoomsController {
 
       const payload = { success: true, data, count: data.length, total };
       if (idioma === "en") {
-        const translated = await RoomTypeTranslationService.translateRoomsShowPayloadToEnglish(payload);
+        const localEnByRoomTypeID = await fetchLocalEnByRoomTypeID(data.map((d) => d.roomTypeID));
+        const translated = await RoomTypeTranslationService.translateRoomsShowPayloadToEnglish(payload, localEnByRoomTypeID);
         res.json(translated);
         return;
       }
@@ -551,7 +580,8 @@ export class RoomsController {
 
       const payload = { success: true, data: reduced };
       if (idioma === "en") {
-        const translated = await RoomTypeTranslationService.translateRoomsShowByIdPayloadToEnglish(payload);
+        const localEnByRoomTypeID = await fetchLocalEnByRoomTypeID([reduced.roomTypeID]);
+        const translated = await RoomTypeTranslationService.translateRoomsShowByIdPayloadToEnglish(payload, localEnByRoomTypeID);
         res.json(translated);
         return;
       }

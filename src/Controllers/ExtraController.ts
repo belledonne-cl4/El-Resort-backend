@@ -2,13 +2,14 @@ import type { Request, Response } from "express";
 import Extra from "../models/Extras";
 import { ExtrasService } from "../services/extras.service";
 import { GcsStorageService } from "../services/csStorage.service";
+import { getGcsConfigFromEnv } from "../config/gcs";
 
 const extractGcsFileIdFromPublicUrl = (value: string): string | null => {
   if (typeof value !== "string" || !value.trim()) return null;
 
   try {
     const parsed = new URL(value);
-    const marker = `/${process.env.GCS_BUCKET_RESORT}/`;
+    const marker = `/${getGcsConfigFromEnv().bucket}/`;
     const markerIndex = parsed.pathname.indexOf(marker);
     if (markerIndex < 0) return null;
 

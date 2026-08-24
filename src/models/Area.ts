@@ -8,6 +8,7 @@ export type AreaType = Document & {
   descripcion: string;
   imagenes: string[];
   categoria: AreaCategoria;
+  orden?: number;
 };
 
 const AreaSchema: Schema = new Schema({
@@ -31,6 +32,11 @@ const AreaSchema: Schema = new Schema({
     type: [String],
     required: true,
     default: [],
+  },
+  orden: {
+    type: Number,
+    required: false,
+    index: true,
   },
 });
 

@@ -26,6 +26,8 @@ import landingPageSectionsRoutes from "./Routes/landingPageSectionsRoutes";
 import translateRoutes from "./Routes/translateRoutes";
 import landingMediaRoutes from "./Routes/landingMediaRoutes";
 import reviewsRoutes from "./Routes/reviewsRoutes";
+import beneficiosRoutes from "./Routes/beneficiosRoutes";
+import claimsRoutes from "./Routes/claimsRoutes";
 
 dotenv.config();
 
@@ -54,7 +56,9 @@ const sanitizeInput = <T extends object>(obj: T): Partial<T> =>
 app.use((req, res, next) => {
   req.body = sanitizeInput(req.body);
   req.query = sanitizeInput(req.query);
-  req.params = sanitizeInput(req.params);
+  // `_.omit` solo quita las claves peligrosas, nunca vacía las que quedan — el `Partial<T>`
+  // que infiere sanitizeInput es más conservador de lo que en verdad devuelve en runtime.
+  req.params = sanitizeInput(req.params) as typeof req.params;
   next();
 });
 
@@ -90,7 +94,9 @@ app.use("/api/textos-landing-page", textosLandingPageRoutes);
 app.use("/api/landing-page-sections", landingPageSectionsRoutes);
 app.use("/api/landing-media", landingMediaRoutes);
 app.use("/api/reviews", reviewsRoutes);
+app.use("/api/beneficios", beneficiosRoutes);
 app.use("/api/translate", translateRoutes);
+app.use("/api/claims", claimsRoutes);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (

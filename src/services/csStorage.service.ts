@@ -1,10 +1,11 @@
 import { Storage } from '@google-cloud/storage';
+import { getGcsConfigFromEnv } from '../config/gcs';
 
 export class GcsStorageService {
   private static getBucket() {
-    const credentials = JSON.parse(process.env.GOOGLE_CLOUD_STORAGE_CREDENTIALS!);
+    const { bucket, credentials } = getGcsConfigFromEnv();
     const storage = new Storage({ credentials });
-    return storage.bucket(process.env.GCS_BUCKET_RESORT!);
+    return storage.bucket(bucket);
   }
 
   static async uploadFile({
@@ -33,7 +34,7 @@ export class GcsStorageService {
       metadata: { contentType: mimeType },
     });
 
-    const publicUrl = `https://storage.googleapis.com/${process.env.GCS_BUCKET_RESORT}/${fileName}`;
+    const publicUrl = `https://storage.googleapis.com/${getGcsConfigFromEnv().bucket}/${fileName}`;
 
     return {
       fileId: fileName,
@@ -57,14 +58,14 @@ export class GcsStorageService {
       const bucket = this.getBucket();
       await Promise.all(fileIds.map(fileId => bucket.file(fileId).delete()));
       return {
-        bucket: process.env.GCS_BUCKET_RESORT,
+        bucket: getGcsConfigFromEnv().bucket,
         deleted: fileIds.length,
         fileIds,
       };
     } catch (error) {
       console.error('Error deleting files from GCS:', error);
       return {
-        bucket: process.env.GCS_BUCKET_RESORT,
+        bucket: getGcsConfigFromEnv().bucket,
         deleted: 0,
         fileIds: [],
       };
@@ -106,7 +107,7 @@ export class GcsStorageService {
           });
           url = signedUrl;
         } else {
-          url = `https://storage.googleapis.com/${process.env.GCS_BUCKET_RESORT}/${file.name}`;
+          url = `https://storage.googleapis.com/${getGcsConfigFromEnv().bucket}/${file.name}`;
         }
 
         return {
@@ -124,7 +125,7 @@ export class GcsStorageService {
     );
 
     return {
-      bucket: process.env.GCS_BUCKET_RESORT,
+      bucket: getGcsConfigFromEnv().bucket,
       page,
       pageSize,
       prefix,

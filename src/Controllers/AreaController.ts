@@ -3,13 +3,14 @@ import mongoose from "mongoose";
 import Area, { AREA_CATEGORIAS } from "../models/Area";
 import { GcsStorageService } from "../services/csStorage.service";
 import { asOptionalString } from "../utils/http";
+import { getGcsConfigFromEnv } from "../config/gcs";
 
 const extractGcsFileIdFromPublicUrl = (value: string): string | null => {
   if (typeof value !== "string" || !value.trim()) return null;
 
   try {
     const parsed = new URL(value);
-    const marker = `/${process.env.GCS_BUCKET_RESORT}/`;
+    const marker = `/${getGcsConfigFromEnv().bucket}/`;
     const markerIndex = parsed.pathname.indexOf(marker);
     if (markerIndex < 0) return null;
 
@@ -245,7 +246,7 @@ export class AreaController {
       }
 
       const filter = categoria ? { categoria } : {};
-      const areas = await Area.find(filter).lean();
+      const areas = await Area.find(filter).sort({ orden: 1 }).lean();
       res.json(areas);
     } catch (error) {
       console.log(error);
@@ -265,10 +266,9 @@ export class AreaController {
 
     try {
       await area.save();
-      res.send("Área creada correctamente");
-    } catch (error) {
-      console.log(error);
-      res.status(500).json({ message: "Error al crear el área", error });
+      res.status(201).json({ success: true, data: area });
+    } catch (_error) {
+      res.status(500).json({ error: "Error al crear el área" });
     }
   };
 
@@ -423,6 +423,71 @@ export class AreaController {
         data: area,
         removed: existing.length - remaining.length,
       });
+    } catch (_error) {
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  static deleteArea = async (req: Request, res: Response) => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        res.status(503).json({ error: "Base de datos no conectada" });
+        return;
+      }
+
+      const { id } = req.params;
+      const area = await Area.findById(id);
+      if (!area) {
+        res.status(404).json({ error: "No encontrado" });
+        return;
+      }
+
+      const fileIds = (Array.isArray(area.imagenes) ? area.imagenes : [])
+        .map((url) => extractGcsFileIdFromPublicUrl(url))
+        .filter((value): value is string => typeof value === "string" && value.length > 0);
+
+      await Area.deleteOne({ _id: id });
+
+      if (fileIds.length > 0) {
+        await Promise.allSettled(fileIds.map((fileId) => GcsStorageService.deleteFile({ fileId })));
+      }
+
+      res.json({ success: true });
+    } catch (_error) {
+      res.status(500).json({ error: "Error interno del servidor" });
+    }
+  };
+
+  /** Reordena en cascada: aplica el `orden` recibido a cada id y no toca los que no vienen en la lista. */
+  static updateOrderBulk = async (req: Request, res: Response) => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        res.status(503).json({ error: "Base de datos no conectada" });
+        return;
+      }
+
+      const payload = req.body as Array<{ id?: unknown; orden?: unknown }>;
+      if (!Array.isArray(payload) || payload.length === 0) {
+        res.status(400).json({ error: "Debe enviar un array con objetos { id, orden }" });
+        return;
+      }
+
+      const operations = payload
+        .filter(
+          (item): item is { id: string; orden: number } =>
+            !!item && typeof item.id === "string" && Number.isInteger(item.orden)
+        )
+        .map((item) => ({
+          updateOne: { filter: { _id: item.id }, update: { $set: { orden: item.orden } } },
+        }));
+
+      if (operations.length === 0) {
+        res.status(400).json({ error: "No hay elementos válidos para actualizar" });
+        return;
+      }
+
+      await Area.bulkWrite(operations, { ordered: false });
+      res.json({ success: true });
     } catch (_error) {
       res.status(500).json({ error: "Error interno del servidor" });
     }

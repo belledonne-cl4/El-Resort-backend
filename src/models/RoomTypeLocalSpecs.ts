@@ -24,6 +24,13 @@ export type RoomTypeLocalSpecsType = Document & {
     ofertaDelMesRoomRate?: number;
   };
   condominioID?: mongoose.Types.ObjectId;
+  /** Beneficios del catálogo que esta propiedad muestra. Vacío = se cae a los de Cloudbeds. */
+  beneficios: mongoose.Types.ObjectId[];
+  /** Nombre/descripción locales; `es` vacío = se cae al dato de Cloudbeds (ver roomTypesShow.service.ts). */
+  roomTypeName?: { es: string; en?: string | null };
+  roomTypeDescription?: { es: string; en?: string | null };
+  /** Huéspedes máximos local; `null`/no seteado = se cae al dato de Cloudbeds. */
+  maxGuests?: number | null;
 };
 
 const RoomTypeLocalSpecsSchema: Schema = new Schema(
@@ -100,6 +107,26 @@ const RoomTypeLocalSpecsSchema: Schema = new Schema(
       ref: "Condominio",
       required: false,
       index: true,
+    },
+    beneficios: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Beneficio" }],
+      required: true,
+      default: [],
+      index: true,
+    },
+    roomTypeName: {
+      es: { type: String, required: false, trim: true },
+      en: { type: String, required: false, default: null },
+    },
+    roomTypeDescription: {
+      es: { type: String, required: false, trim: true },
+      en: { type: String, required: false, default: null },
+    },
+    maxGuests: {
+      type: Number,
+      required: false,
+      default: null,
+      min: 1,
     },
     isActive: {
       type: Boolean,
