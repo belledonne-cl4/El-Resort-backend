@@ -255,19 +255,41 @@ export class AreaController {
   };
 
   static createArea = async (req: Request, res: Response) => {
-    const { nombre, descripcion, imagenes, categoria } = req.body as { nombre?: unknown; descripcion?: unknown; imagenes?: unknown; categoria?: unknown };
+    const { nombre, descripcion, categoria } = req.body as { nombre?: unknown; descripcion?: unknown; categoria?: unknown };
+    const imageUrls = parseImageUrlsInput(req.body?.imagenes);
+    const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
 
-    const area = new Area({
-      nombre,
-      descripcion: typeof descripcion === "string" ? descripcion : "",
-      categoria,
-      imagenes: Array.isArray(imagenes) ? imagenes : [],
-    });
+    let uploadedFileId: string | null = null;
 
     try {
+      let imagenes = imageUrls;
+
+      if (files.length === 1) {
+        const file = files[0];
+        const uploaded = await GcsStorageService.uploadFile({
+          fileBuffer: file.buffer,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          mediaKind: "image",
+        });
+
+        uploadedFileId = uploaded.fileId;
+        imagenes = [uploaded.url];
+      }
+
+      const area = new Area({
+        nombre,
+        descripcion: typeof descripcion === "string" ? descripcion : "",
+        categoria,
+        imagenes,
+      });
+
       await area.save();
       res.status(201).json({ success: true, data: area });
     } catch (_error) {
+      if (uploadedFileId) {
+        await Promise.allSettled([GcsStorageService.deleteFile({ fileId: uploadedFileId })]);
+      }
       res.status(500).json({ error: "Error al crear el área" });
     }
   };

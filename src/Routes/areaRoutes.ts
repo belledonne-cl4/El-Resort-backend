@@ -39,11 +39,10 @@ router.get(
 // Crear área
 router.post(
   "/",
+  upload.array("imagenes", 1),
   body("nombre").notEmpty().withMessage("El nombre del área es requerido"),
   body("categoria").notEmpty().withMessage("La categoría es requerida"),
   body("categoria").isIn(AREA_CATEGORIAS).withMessage("La categoría no es válida"),
-  body("imagenes").optional().isArray().withMessage("Las imágenes deben ser un array"),
-  body("imagenes.*").optional().isString().withMessage("Cada imagen debe ser un string"),
   handleInputErrors,
   authenticate,
   hasRole(["marketing"]),
